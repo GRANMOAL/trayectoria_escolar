@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Trayectoria Escolar{% endblock %}</title>
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'css/estilos.css' %}">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap');
+  </style>
+</head>
+<body>
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <h1>Sistema de<br>Trayectoria<br>Escolar</h1>
+      <span>ITHI · 2024</span>
+    </div>
+    <a href="{% url 'dashboard' %}" class="nav-item {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
+      <span class="icon">◈</span> Dashboard
+    </a>
+    <a href="{% url 'lista_alumnos' %}" class="nav-item {% if request.resolver_match.url_name == 'lista_alumnos' %}active{% endif %}">
+      <span class="icon">◉</span> Lista de Alumnos
+    </a>
+    <a href="{% url 'calificaciones' %}" class="nav-item {% if request.resolver_match.url_name == 'calificaciones' %}active{% endif %}">
+      <span class="icon">◎</span> Calificaciones
+    </a>
+    <a href="{% url 'indicadores' %}" class="nav-item {% if request.resolver_match.url_name == 'indicadores' %}active{% endif %}">
+      <span class="icon">◆</span> Indicadores
+    </a>
+    <a href="{% url 'pronostico' %}" class="nav-item {% if request.resolver_match.url_name == 'pronostico' %}active{% endif %}">
+      <span class="icon">◇</span> Pronóstico IA
+    </a>
+    <div style="margin-top: auto; padding: 16px 20px; border-top: 1px solid var(--border);">
+      <a href="{% url 'exportar_excel' %}{% if request.GET.grupo %}?grupo={{ request.GET.grupo }}{% endif %}" class="btn btn-success" style="width:100%; justify-content:center; font-size:12px;">
+        ↓ Exportar Excel
+      </a>
+    </div>
+  </nav>
+
+  <main class="main">
+    {% if messages %}
+      {% for msg in messages %}
+        <div style="background: rgba(255,68,68,0.1); border: 1px solid var(--danger); border-radius:8px; padding:12px 16px; margin-bottom:16px; color:var(--danger); font-size:13px;">
+          {{ msg }}
+        </div>
+      {% endfor %}
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

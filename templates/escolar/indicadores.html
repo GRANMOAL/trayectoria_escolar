@@ -1,0 +1,117 @@
+{% extends 'escolar/base.html' %}
+{% block title %}Indicadores{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h2>Indicadores de Trayectoria Escolar</h2>
+  <p>Promedio de grupo · Asignatura · Alumno — Índices de aprobación / reprobación</p>
+</div>
+
+<div class="filter-bar">
+  <div class="form-group">
+    <label>Grupo</label>
+    <select id="grupo-sel" onchange="window.location.href='{% url 'indicadores' %}?grupo='+this.value">
+      <option value="">— Seleccionar grupo —</option>
+      {% for g in grupos %}
+      <option value="{{ g.id }}" {% if grupo_sel and grupo_sel.id == g.id %}selected{% endif %}>
+        {{ g.semestre.nombre }} — Grupo {{ g.nombre }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  {% if grupo_sel %}
+  <a href="{% url 'exportar_excel' %}?grupo={{ grupo_sel.id }}" class="btn btn-success">↓ Exportar Excel</a>
+  {% endif %}
+</div>
+
+{% if grupo_sel %}
+<div class="stat-grid">
+  <div class="stat-card accent">
+    <div class="stat-label">Total Alumnos</div>
+    <div class="stat-value">{{ stats.total }}</div>
+    <div class="stat-sub">en el grupo</div>
+  </div>
+  <div class="stat-card success">
+    <div class="stat-label">Alumnos Aprobados</div>
+    <div class="stat-value">{{ stats.aprobados }}</div>
+    <div class="stat-sub">{{ stats.pct_aprobacion }}% de aprobación</div>
+  </div>
+  <div class="stat-card danger">
+    <div class="stat-label">Alumnos Reprobados</div>
+    <div class="stat-value">{{ stats.reprobados }}</div>
+    <div class="stat-sub">{{ stats.pct_reprobacion }}% de reprobación</div>
+  </div>
+  <div class="stat-card warning">
+    <div class="stat-label">Promedio del Grupo</div>
+    <div class="stat-value">{{ stats.promedio_grupo }}</div>
+    <div class="stat-sub">calificación general</div>
+  </div>
+</div>
+
+<div class="charts-grid">
+  {% if graficas.pastel %}
+  <div class="chart-card">
+    <h3>Índice de Aprobación / Reprobación</h3>
+    <img src="data:image/png;base64,{{ graficas.pastel }}" alt="Gráfica pastel">
+  </div>
+  {% endif %}
+  {% if graficas.parciales %}
+  <div class="chart-card">
+    <h3>Evolución por Parcial</h3>
+    <img src="data:image/png;base64,{{ graficas.parciales }}" alt="Gráfica parciales">
+  </div>
+  {% endif %}
+</div>
+
+{% if graficas.alumnos %}
+<div class="chart-card" style="margin-top:20px;">
+  <h3>Promedio por Alumno</h3>
+  <img src="data:image/png;base64,{{ graficas.alumnos }}" alt="Gráfica alumnos">
+</div>
+{% endif %}
+
+{% if stats.asig_reprobadas %}
+<div class="card" style="margin-top:24px;">
+  <div class="section-title">Asignaturas con Alumnos Reprobados</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Asignatura</th>
+          <th>Clave</th>
+          <th>Promedio</th>
+          <th>Reprobados</th>
+          <th>Alumnos</th>
+          <th>Pronóstico IA</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in stats.asig_reprobadas %}
+        <tr>
+          <td style="font-weight:600;">{{ item.asignatura.nombre }}</td>
+          <td><span class="badge badge-accent" style="font-family:var(--font-mono);">{{ item.asignatura.clave }}</span></td>
+          <td>
+            <span class="score {% if item.promedio >= 7 %}score-high{% elif item.promedio >= 6 %}score-med{% else %}score-low{% endif %}">
+              {{ item.promedio }}
+            </span>
+          </td>
+          <td><span class="badge badge-danger">{{ item.total_reprobados }}</span></td>
+          <td style="font-size:12px; color:var(--text-muted);">
+            {% for a in item.alumnos %}{{ a }}{% if not forloop.last %}, {% endif %}{% endfor %}
+          </td>
+          <td style="font-size:13px; font-weight:600;">{{ item.pronostico }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% else %}
+<div style="text-align:center; padding:60px; color:var(--text-muted);">
+  <div style="font-size:40px; margin-bottom:16px;">◆</div>
+  <div style="font-size:16px; font-weight:700; margin-bottom:8px;">Selecciona un Grupo</div>
+  <div style="font-size:13px;">Para ver los indicadores de trayectoria</div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,106 @@
+{% extends 'escolar/base.html' %}
+{% block title %}Pronóstico IA{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h2>Pronóstico con Inteligencia Artificial</h2>
+  <p>Predicción de calificaciones usando regresión lineal por alumno y asignatura</p>
+</div>
+
+<div class="filter-bar">
+  <div class="form-group">
+    <label>Grupo</label>
+    <select onchange="window.location.href='{% url 'pronostico' %}?grupo='+this.value">
+      <option value="">— Seleccionar grupo —</option>
+      {% for g in grupos %}
+      <option value="{{ g.id }}" {% if grupo_sel and grupo_sel.id == g.id %}selected{% endif %}>
+        {{ g.semestre.nombre }} — Grupo {{ g.nombre }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+</div>
+
+{% if grupo_sel %}
+
+{% if graficas.riesgo %}
+<div class="chart-card" style="margin-bottom:24px;">
+  <h3>Alumnos en Riesgo de Reprobación por Asignatura</h3>
+  <img src="data:image/png;base64,{{ graficas.riesgo }}" alt="Pronóstico riesgo">
+</div>
+{% endif %}
+
+<div style="display:flex; gap:12px; margin-bottom:16px; align-items:center; flex-wrap:wrap;">
+  <div class="badge badge-success">📈 Tendencia de mejora</div>
+  <div class="badge badge-danger">📉 Riesgo alto</div>
+  <div class="badge badge-warning">➡️ Tendencia estable</div>
+  <span style="font-size:12px; color:var(--text-muted); font-family:var(--font-mono);">Predicción P3 basada en regresión lineal</span>
+</div>
+
+{% for dato in resultado %}
+<div class="card" style="margin-bottom:16px;">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+    <div>
+      <span style="font-weight:700; font-size:14px;">{{ dato.alumno.nombre_completo }}</span>
+      <span style="font-family:var(--font-mono); font-size:12px; color:var(--text-muted); margin-left:10px;">{{ dato.alumno.numero_cuenta }}</span>
+    </div>
+  </div>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Asignatura</th>
+          <th>Parcial 1</th>
+          <th>Parcial 2</th>
+          <th>Parcial 3</th>
+          <th>Pronóstico P3</th>
+          <th>Tendencia</th>
+          <th>Estado</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in dato.asignaturas %}
+        <tr {% if a.riesgo %}style="background:rgba(255,68,68,0.05)"{% endif %}>
+          <td style="font-weight:600;">{{ a.asignatura.nombre }}</td>
+          {% for p in a.promedios %}
+          <td class="score {% if p >= 8 %}score-high{% elif p >= 6 %}score-med{% else %}score-low{% endif %}">{{ p }}</td>
+          {% endfor %}
+          {% for i in "xx"|make_list %}{% if forloop.counter <= 3|add:"-"|add:a.promedios|length|add:"" %}{% endif %}{% endfor %}
+          {% if a.promedios|length < 2 %}<td style="color:var(--text-muted)">—</td>{% endif %}
+          {% if a.promedios|length < 3 %}<td style="color:var(--text-muted)">—</td>{% endif %}
+          <td>
+            {% if a.pronostico is not None %}
+            <span class="score {% if a.pronostico >= 8 %}score-high{% elif a.pronostico >= 6 %}score-med{% else %}score-low{% endif %}" style="font-size:15px;">
+              {{ a.pronostico }}
+            </span>
+            {% else %}<span style="color:var(--text-muted)">N/D</span>{% endif %}
+          </td>
+          <td>
+            <span class="{% if a.tendencia == 'mejora' %}tendencia-mejora{% elif a.tendencia == 'baja' %}tendencia-baja{% else %}tendencia-estable{% endif %}" style="font-weight:700; font-size:13px;">
+              {% if a.tendencia == 'mejora' %}📈 Mejora{% elif a.tendencia == 'baja' %}📉 Baja{% elif a.tendencia == 'estable' %}➡️ Estable{% else %}—{% endif %}
+            </span>
+          </td>
+          <td>
+            {% if a.riesgo %}
+              <span class="badge badge-danger">⚠ Riesgo</span>
+            {% elif a.pronostico is not None %}
+              <span class="badge badge-success">✓ OK</span>
+            {% else %}
+              <span class="badge" style="background:rgba(255,255,255,0.05); color:var(--text-muted);">Sin datos</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+
+{% else %}
+<div style="text-align:center; padding:60px; color:var(--text-muted);">
+  <div style="font-size:40px; margin-bottom:16px;">◇</div>
+  <div style="font-size:16px; font-weight:700; margin-bottom:8px;">Selecciona un Grupo</div>
+  <div style="font-size:13px;">Para generar pronósticos con IA</div>
+</div>
+{% endif %}
+{% endblock %}

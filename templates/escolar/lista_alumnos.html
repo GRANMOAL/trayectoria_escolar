@@ -1,0 +1,75 @@
+{% extends 'escolar/base.html' %}
+{% block title %}Lista de Alumnos{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h2>Lista de Alumnos</h2>
+  <p>Correspondencia alumno — semestre — grupo</p>
+</div>
+
+<div class="filter-bar">
+  <div class="form-group">
+    <label>Filtrar por Grupo</label>
+    <select id="grupo-select" onchange="this.form.submit()">
+      <option value="">— Todos los grupos —</option>
+      {% for g in grupos %}
+      <option value="{{ g.id }}" {% if grupo_sel and grupo_sel.id == g.id %}selected{% endif %}>
+        {{ g.semestre.nombre }} — Grupo {{ g.nombre }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="btn btn-primary" onclick="document.getElementById('grupo-select').dispatchEvent(new Event('change'))">
+    Filtrar
+  </button>
+  {% if grupo_sel %}
+  <a href="{% url 'exportar_excel' %}?grupo={{ grupo_sel.id }}" class="btn btn-success">↓ Exportar Excel</a>
+  {% endif %}
+</div>
+
+<script>
+document.getElementById('grupo-select').addEventListener('change', function() {
+  window.location.href = '{% url "lista_alumnos" %}?grupo=' + this.value;
+});
+</script>
+
+{% if grupo_sel %}
+<div style="margin-bottom:16px; display:flex; align-items:center; gap:12px;">
+  <span class="badge badge-accent">Grupo {{ grupo_sel.nombre }}</span>
+  <span class="badge badge-warning">{{ grupo_sel.semestre.nombre }}</span>
+  <span style="color:var(--text-muted); font-size:13px; font-family:var(--font-mono);">{{ alumnos.count }} alumnos</span>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>No. Cuenta</th>
+          <th>Nombre Completo</th>
+          <th>Correo Electrónico</th>
+          <th>Grupo</th>
+          <th>Semestre</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for alumno in alumnos %}
+        <tr>
+          <td style="color:var(--text-muted); font-family:var(--font-mono);">{{ forloop.counter }}</td>
+          <td><span class="badge badge-accent" style="font-family:var(--font-mono);">{{ alumno.numero_cuenta }}</span></td>
+          <td style="font-weight:600;">{{ alumno.nombre_completo }}</td>
+          <td style="color:var(--text-muted); font-size:12px;">{{ alumno.email }}</td>
+          <td><span class="badge badge-warning">{{ alumno.grupo.nombre }}</span></td>
+          <td style="color:var(--text-muted); font-size:12px;">{{ alumno.grupo.semestre.nombre }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" style="text-align:center; padding:32px; color:var(--text-muted);">
+          Sin alumnos registrados. <a href="/admin/escolar/alumno/add/" style="color:var(--accent);">Agregar alumno</a>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

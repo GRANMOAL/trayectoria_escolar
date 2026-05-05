@@ -1,0 +1,89 @@
+{% extends 'escolar/base.html' %}
+{% block title %}Dashboard · Trayectoria Escolar{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h2>Dashboard General</h2>
+  <p>Sistema de Trayectoria Escolar — Resumen ejecutivo</p>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card accent">
+    <div class="stat-label">Total Alumnos</div>
+    <div class="stat-value">{{ total_alumnos }}</div>
+    <div class="stat-sub">registrados en el sistema</div>
+  </div>
+  <div class="stat-card success">
+    <div class="stat-label">Registros Aprobados</div>
+    <div class="stat-value">{{ aprobados }}</div>
+    <div class="stat-sub">{{ pct_aprobacion }}% de aprobación</div>
+  </div>
+  <div class="stat-card danger">
+    <div class="stat-label">Registros Reprobados</div>
+    <div class="stat-value">{{ reprobados }}</div>
+    <div class="stat-sub">{{ pct_reprobacion }}% de reprobación</div>
+  </div>
+  <div class="stat-card warning">
+    <div class="stat-label">Total Calificaciones</div>
+    <div class="stat-value">{{ total_calificaciones }}</div>
+    <div class="stat-sub">en todos los parciales</div>
+  </div>
+</div>
+
+<div class="grid-2" style="gap:20px; margin-bottom:24px;">
+  <div class="card">
+    <div class="section-title">Grupos Registrados</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Grupo</th><th>Semestre</th><th>Periodo</th></tr></thead>
+        <tbody>
+          {% for grupo in grupos %}
+          <tr>
+            <td><span class="badge badge-accent">{{ grupo.nombre }}</span></td>
+            <td>{{ grupo.semestre.nombre }}</td>
+            <td><span class="badge badge-warning">{{ grupo.semestre.get_periodo_display }}</span></td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="3" style="color:var(--text-muted); text-align:center; padding:20px;">Sin grupos registrados</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Accesos Rápidos</div>
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      <a href="{% url 'lista_alumnos' %}" class="btn btn-primary" style="justify-content:center;">
+        ◉ Ver Lista de Alumnos
+      </a>
+      <a href="{% url 'calificaciones' %}" class="btn" style="background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); justify-content:center;">
+        ◎ Revisar Calificaciones
+      </a>
+      <a href="{% url 'indicadores' %}" class="btn" style="background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); justify-content:center;">
+        ◆ Ver Indicadores
+      </a>
+      <a href="{% url 'pronostico' %}" class="btn" style="background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); justify-content:center;">
+        ◇ Pronóstico IA
+      </a>
+      <a href="/admin/" class="btn" style="background: rgba(124,58,237,0.15); color:var(--accent2); border:1px solid rgba(124,58,237,0.3); justify-content:center;">
+        ⚙ Administración
+      </a>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="border-color: rgba(0,229,255,0.2);">
+  <div class="section-title">Semestres Disponibles</div>
+  <div style="display:flex; gap:12px; flex-wrap:wrap;">
+    {% for semestre in semestres %}
+    <div style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; padding:12px 20px;">
+      <div style="font-size:12px; color:var(--text-muted); font-family:var(--font-mono);">{{ semestre.anio }}</div>
+      <div style="font-weight:700; color:var(--accent);">{{ semestre.nombre }}</div>
+      <div style="font-size:12px; color:var(--text-muted);">{{ semestre.get_periodo_display }}</div>
+    </div>
+    {% empty %}
+    <p style="color:var(--text-muted); font-size:13px;">Agrega semestres desde <a href="/admin/" style="color:var(--accent);">Administración</a></p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

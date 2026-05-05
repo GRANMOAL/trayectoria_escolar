@@ -1,0 +1,120 @@
+{% extends 'escolar/base.html' %}
+{% block title %}Calificaciones{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h2>Calificaciones por Asignatura y Parcial</h2>
+  <p>Heteroevaluación · Coevaluación · Autoevaluación · Promedio</p>
+</div>
+
+<div class="filter-bar">
+  <div class="form-group">
+    <label>Grupo</label>
+    <select id="grupo-sel">
+      <option value="">— Seleccionar —</option>
+      {% for g in grupos %}
+      <option value="{{ g.id }}" {% if grupo_sel and grupo_sel.id == g.id %}selected{% endif %}>
+        {{ g.semestre.nombre }} — Grupo {{ g.nombre }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form-group">
+    <label>Parcial</label>
+    <select id="parcial-sel">
+      {% for p in parciales %}
+      <option value="{{ p }}" {% if parcial == p|stringformat:"s" %}selected{% endif %}>Parcial {{ p }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="btn btn-primary" onclick="filtrar()">Ver Calificaciones</button>
+  {% if grupo_sel %}
+  <a href="{% url 'exportar_excel' %}?grupo={{ grupo_sel.id }}&parcial={{ parcial }}" class="btn btn-success">↓ Exportar Excel</a>
+  {% endif %}
+</div>
+
+<script>
+function filtrar() {
+  const g = document.getElementById('grupo-sel').value;
+  const p = document.getElementById('parcial-sel').value;
+  if(g) window.location.href = `{% url 'calificaciones' %}?grupo=${g}&parcial=${p}`;
+}
+</script>
+
+{% if grupo_sel %}
+<div style="margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+  <span class="badge badge-accent">Grupo {{ grupo_sel.nombre }}</span>
+  <span class="badge badge-warning">Parcial {{ parcial }}</span>
+  <span style="color:var(--text-muted); font-size:12px; font-family:var(--font-mono);">{{ grupo_sel.semestre.nombre }}</span>
+</div>
+
+<div class="card" style="margin-bottom:24px;">
+  <div class="section-title">Tabla de Calificaciones</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>No. Cuenta</th>
+          <th>Alumno</th>
+          {% for asig in asignaturas %}
+          <th style="white-space:nowrap">{{ asig.nombre|truncatechars:18 }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in datos %}
+        <tr>
+          <td style="font-family:var(--font-mono); font-size:12px; color:var(--text-muted);">{{ row.alumno.numero_cuenta }}</td>
+          <td style="font-weight:600; white-space:nowrap;">{{ row.alumno.nombre_completo }}</td>
+          {% for asig in asignaturas %}
+            {% with cal=row.calificaciones|default_if_none:'' %}
+            {% with c=row.calificaciones %}
+            <td>
+              {% if c|length %}
+                {% for key, cal in c.items %}
+                  {% if key == asig.clave %}
+                    {% if cal %}
+                      <div style="text-align:center;">
+                        <div class="score {% if cal.promedio >= 8 %}score-high{% elif cal.promedio >= 6 %}score-med{% else %}score-low{% endif %}">
+                          {{ cal.promedio }}
+                        </div>
+                        <div style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono); margin-top:2px;">
+                          H:{{ cal.heteroevaluacion }} C:{{ cal.coevaluacion }} A:{{ cal.autoevaluacion }}
+                        </div>
+                        <span class="badge {% if cal.aprobado %}badge-success{% else %}badge-danger{% endif %}" style="font-size:9px; margin-top:2px;">
+                          {% if cal.aprobado %}✓{% else %}✗{% endif %}
+                        </span>
+                      </div>
+                    {% else %}
+                      <span style="color:var(--text-muted); font-size:12px;">—</span>
+                    {% endif %}
+                  {% endif %}
+                {% endfor %}
+              {% endif %}
+            </td>
+            {% endwith %}
+            {% endwith %}
+          {% endfor %}
+        </tr>
+        {% empty %}
+        <tr><td colspan="20" style="text-align:center; padding:24px; color:var(--text-muted);">Sin datos</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if graficas.asignaturas %}
+<div class="chart-card">
+  <h3>Promedio por Asignatura — Parcial {{ parcial }}</h3>
+  <img src="data:image/png;base64,{{ graficas.asignaturas }}" alt="Gráfica promedios por asignatura">
+</div>
+{% endif %}
+
+{% else %}
+<div style="text-align:center; padding:60px; color:var(--text-muted);">
+  <div style="font-size:40px; margin-bottom:16px;">◎</div>
+  <div style="font-size:16px; font-weight:700; margin-bottom:8px;">Selecciona un Grupo y Parcial</div>
+  <div style="font-size:13px;">Para visualizar las calificaciones</div>
+</div>
+{% endif %}
+{% endblock %}
