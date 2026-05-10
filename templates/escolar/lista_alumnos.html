@@ -2,74 +2,69 @@
 {% block title %}Lista de Alumnos{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h2>Lista de Alumnos</h2>
-  <p>Correspondencia alumno — semestre — grupo</p>
-</div>
-
-<div class="filter-bar">
-  <div class="form-group">
-    <label>Filtrar por Grupo</label>
-    <select id="grupo-select" onchange="this.form.submit()">
-      <option value="">— Todos los grupos —</option>
-      {% for g in grupos %}
-      <option value="{{ g.id }}" {% if grupo_sel and grupo_sel.id == g.id %}selected{% endif %}>
-        {{ g.semestre.nombre }} — Grupo {{ g.nombre }}
-      </option>
-      {% endfor %}
-    </select>
+  <div class="page-header-text">
+    <h2> Lista de Alumnos</h2>
+    <p>Registro completo · Correspondencia alumno — semestre — grupo</p>
   </div>
-  <button class="btn btn-primary" onclick="document.getElementById('grupo-select').dispatchEvent(new Event('change'))">
-    Filtrar
-  </button>
   {% if grupo_sel %}
-  <a href="{% url 'exportar_excel' %}?grupo={{ grupo_sel.id }}" class="btn btn-success">↓ Exportar Excel</a>
+  <a href="{% url 'exportar_excel' %}?grupo={{ grupo_sel.id }}" class="btn btn-success">⬇ Exportar Excel</a>
   {% endif %}
 </div>
 
-<script>
-document.getElementById('grupo-select').addEventListener('change', function() {
-  window.location.href = '{% url "lista_alumnos" %}?grupo=' + this.value;
-});
-</script>
+<div class="toolbar">
+  <div class="form-group">
+    <label>Filtrar por Grupo</label>
+    <select id="grupo-sel" onchange="window.location.href='{% url 'lista_alumnos' %}?grupo='+this.value">
+      <option value="">— Todos los grupos —</option>
+      {% for g in grupos %}<option value="{{ g.id }}" {% if grupo_sel and grupo_sel.id == g.id %}selected{% endif %}>{{ g.semestre.nombre }} — Grupo {{ g.nombre }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="form-group">
+    <label>Buscar</label>
+    <input type="text" id="busqueda" placeholder="Nombre o número…" oninput="filtrarTabla()">
+  </div>
+</div>
 
 {% if grupo_sel %}
-<div style="margin-bottom:16px; display:flex; align-items:center; gap:12px;">
-  <span class="badge badge-accent">Grupo {{ grupo_sel.nombre }}</span>
-  <span class="badge badge-warning">{{ grupo_sel.semestre.nombre }}</span>
-  <span style="color:var(--text-muted); font-size:13px; font-family:var(--font-mono);">{{ alumnos.count }} alumnos</span>
+<div style="display:flex; gap:8px; margin-bottom:16px; align-items:center; flex-wrap:wrap;">
+  <span class="badge badge-primary">Grupo {{ grupo_sel.nombre }}</span>
+  <span class="badge badge-amber">{{ grupo_sel.semestre.nombre }}</span>
+  <span class="chip">{{ alumnos.count }} alumnos</span>
 </div>
 {% endif %}
 
-<div class="card">
+<div class="card" style="padding:0; overflow:hidden;">
   <div class="table-wrap">
-    <table>
+    <table id="tabla-alumnos">
       <thead>
-        <tr>
-          <th>#</th>
-          <th>No. Cuenta</th>
-          <th>Nombre Completo</th>
-          <th>Correo Electrónico</th>
-          <th>Grupo</th>
-          <th>Semestre</th>
-        </tr>
+        <tr><th>#</th><th>No. Cuenta</th><th>Nombre Completo</th><th>Email</th><th>Grupo</th><th>Semestre</th></tr>
       </thead>
       <tbody>
         {% for alumno in alumnos %}
-        <tr>
-          <td style="color:var(--text-muted); font-family:var(--font-mono);">{{ forloop.counter }}</td>
-          <td><span class="badge badge-accent" style="font-family:var(--font-mono);">{{ alumno.numero_cuenta }}</span></td>
+        <tr data-nombre="{{ alumno.nombre_completo|lower }}" data-cuenta="{{ alumno.numero_cuenta }}">
+          <td style="color:var(--text-light); font-weight:600; font-size:12px;">{{ forloop.counter }}</td>
+          <td><span class="badge badge-primary" style="font-family:monospace;">{{ alumno.numero_cuenta }}</span></td>
           <td style="font-weight:600;">{{ alumno.nombre_completo }}</td>
           <td style="color:var(--text-muted); font-size:12px;">{{ alumno.email }}</td>
-          <td><span class="badge badge-warning">{{ alumno.grupo.nombre }}</span></td>
-          <td style="color:var(--text-muted); font-size:12px;">{{ alumno.grupo.semestre.nombre }}</td>
+          <td><span class="badge badge-amber">{{ alumno.grupo.nombre }}</span></td>
+          <td style="font-size:12px; color:var(--text-muted);">{{ alumno.grupo.semestre.nombre }}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="6" style="text-align:center; padding:32px; color:var(--text-muted);">
-          Sin alumnos registrados. <a href="/admin/escolar/alumno/add/" style="color:var(--accent);">Agregar alumno</a>
+        <tr><td colspan="6" style="text-align:center; padding:40px; color:var(--text-muted);">
+          <div style="font-size:36px; margin-bottom:8px;"></div>
+          Sin alumnos. <a href="{% url 'profesor' %}" style="color:var(--primary);">Agregar desde Panel Tutor</a>
         </td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+<script>
+function filtrarTabla() {
+  const q = document.getElementById('busqueda').value.toLowerCase();
+  document.querySelectorAll('#tabla-alumnos tbody tr[data-nombre]').forEach(tr => {
+    tr.style.display = (tr.dataset.nombre.includes(q) || tr.dataset.cuenta.includes(q)) ? '' : 'none';
+  });
+}
+</script>
 {% endblock %}

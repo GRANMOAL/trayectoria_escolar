@@ -6,47 +6,119 @@
   <title>{% block title %}Trayectoria Escolar{% endblock %}</title>
   {% load static %}
   <link rel="stylesheet" href="{% static 'css/estilos.css' %}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Fraunces:wght@700;900&display=swap" rel="stylesheet">
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap');
+    .nav-svg { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; flex-shrink:0; }
   </style>
 </head>
 <body>
-  <nav class="sidebar">
-    <div class="sidebar-logo">
-      <h1>Sistema de<br>Trayectoria<br>Escolar</h1>
-      <span>ITHI · 2024</span>
-    </div>
-    <a href="{% url 'dashboard' %}" class="nav-item {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
-      <span class="icon">◈</span> Dashboard
-    </a>
-    <a href="{% url 'lista_alumnos' %}" class="nav-item {% if request.resolver_match.url_name == 'lista_alumnos' %}active{% endif %}">
-      <span class="icon">◉</span> Lista de Alumnos
-    </a>
-    <a href="{% url 'calificaciones' %}" class="nav-item {% if request.resolver_match.url_name == 'calificaciones' %}active{% endif %}">
-      <span class="icon">◎</span> Calificaciones
-    </a>
-    <a href="{% url 'indicadores' %}" class="nav-item {% if request.resolver_match.url_name == 'indicadores' %}active{% endif %}">
-      <span class="icon">◆</span> Indicadores
-    </a>
-    <a href="{% url 'pronostico' %}" class="nav-item {% if request.resolver_match.url_name == 'pronostico' %}active{% endif %}">
-      <span class="icon">◇</span> Pronóstico IA
-    </a>
-    <div style="margin-top: auto; padding: 16px 20px; border-top: 1px solid var(--border);">
-      <a href="{% url 'exportar_excel' %}{% if request.GET.grupo %}?grupo={{ request.GET.grupo }}{% endif %}" class="btn btn-success" style="width:100%; justify-content:center; font-size:12px;">
-        ↓ Exportar Excel
-      </a>
-    </div>
-  </nav>
 
-  <main class="main">
-    {% if messages %}
-      {% for msg in messages %}
-        <div style="background: rgba(255,68,68,0.1); border: 1px solid var(--danger); border-radius:8px; padding:12px 16px; margin-bottom:16px; color:var(--danger); font-size:13px;">
-          {{ msg }}
-        </div>
-      {% endfor %}
-    {% endif %}
-    {% block content %}{% endblock %}
-  </main>
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-logo">
+    <div class="sidebar-logo-icon">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
+    </div>
+    <h1>Trayectoria<br>Escolar</h1>
+    <span>Preparatoria · ITHI</span>
+  </div>
+
+  <div class="nav-section">General</div>
+
+  <a href="{% url 'dashboard' %}" class="nav-item {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
+    <span class="nav-icon">
+      <svg class="nav-svg" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+    </span>
+    Dashboard
+  </a>
+
+  <a href="{% url 'lista_alumnos' %}" class="nav-item {% if request.resolver_match.url_name == 'lista_alumnos' %}active{% endif %}">
+    <span class="nav-icon">
+      <svg class="nav-svg" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    </span>
+    Lista de Alumnos
+  </a>
+
+  <a href="{% url 'calificaciones' %}" class="nav-item {% if request.resolver_match.url_name == 'calificaciones' %}active{% endif %}">
+    <span class="nav-icon">
+      <svg class="nav-svg" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10,9 9,9 8,9"/></svg>
+    </span>
+    Calificaciones
+  </a>
+
+  <a href="{% url 'indicadores' %}" class="nav-item {% if request.resolver_match.url_name == 'indicadores' %}active{% endif %}">
+    <span class="nav-icon">
+      <svg class="nav-svg" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+    </span>
+    Indicadores
+  </a>
+
+  <a href="{% url 'pronostico' %}" class="nav-item {% if request.resolver_match.url_name == 'pronostico' %}active{% endif %}">
+    <span class="nav-icon">
+      <svg class="nav-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+    </span>
+    Pronóstico IA
+  </a>
+
+  <div class="nav-section">Profesor / Tutor</div>
+
+  <a href="{% url 'profesor' %}" class="nav-item {% if request.resolver_match.url_name == 'profesor' %}active{% endif %}">
+    <span class="nav-icon">
+      <svg class="nav-svg" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/><line x1="12" y1="12" x2="12" y2="21"/></svg>
+    </span>
+    Panel del Tutor
+  </a>
+
+  <a href="{% url 'captura_rapida' %}" class="nav-item {% if request.resolver_match.url_name == 'captura_rapida' %}active{% endif %}">
+    <span class="nav-icon">
+      <svg class="nav-svg" viewBox="0 0 24 24"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10 13,2"/></svg>
+    </span>
+    Captura Rápida
+  </a>
+
+  <a href="{% url 'seguimiento' %}" class="nav-item {% if request.resolver_match.url_name == 'seguimiento' %}active{% endif %}">
+    <span class="nav-icon">
+      <svg class="nav-svg" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    </span>
+    Seguimiento
+  </a>
+
+  <div class="sidebar-footer">
+    <a href="{% url 'exportar_excel' %}{% if request.GET.grupo %}?grupo={{ request.GET.grupo }}{% endif %}"
+       class="btn btn-success" style="width:100%; justify-content:center; gap:8px;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Exportar Excel
+    </a>
+  </div>
+</nav>
+
+<main class="main">
+  {% if messages %}
+  <div class="toast-wrap" id="toasts">
+    {% for msg in messages %}
+    <div class="toast toast-{% if 'error' in msg.tags %}error{% elif 'warning' in msg.tags %}warning{% elif 'success' in msg.tags %}success{% else %}info{% endif %}">
+      {{ msg }}
+    </div>
+    {% endfor %}
+  </div>
+  <script>
+    setTimeout(() => {
+      const el = document.getElementById('toasts');
+      if (el) { el.style.opacity = '0'; el.style.transition = 'opacity .5s'; setTimeout(() => el.remove(), 500); }
+    }, 4500);
+  </script>
+  {% endif %}
+
+  {% block content %}{% endblock %}
+</main>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.progress-bar-fill[data-pct]').forEach(el => {
+    const pct = el.dataset.pct;
+    setTimeout(() => { el.style.width = pct + '%'; }, 200);
+  });
+});
+</script>
 </body>
 </html>

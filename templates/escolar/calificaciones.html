@@ -81,7 +81,7 @@ function filtrar() {
                           H:{{ cal.heteroevaluacion }} C:{{ cal.coevaluacion }} A:{{ cal.autoevaluacion }}
                         </div>
                         <span class="badge {% if cal.aprobado %}badge-success{% else %}badge-danger{% endif %}" style="font-size:9px; margin-top:2px;">
-                          {% if cal.aprobado %}✓{% else %}✗{% endif %}
+                          {% if cal.aprobado %}{% else %}{% endif %}
                         </span>
                       </div>
                     {% else %}

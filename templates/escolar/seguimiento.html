@@ -1,0 +1,159 @@
+{% extends 'escolar/base.html' %}
+{% block title %}Seguimiento{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-header-text">
+    <h2> Seguimiento de Alumnos</h2>
+    <p>Notas, alertas y bitácora del tutor por alumno</p>
+  </div>
+</div>
+
+<div class="toolbar" style="margin-bottom:20px;">
+  <div class="form-group">
+    <label>Grupo</label>
+    <select id="grupo-seg" onchange="window.location.href='{% url 'seguimiento' %}?grupo='+this.value">
+      <option value="">— Todos los grupos —</option>
+      {% for g in grupos %}<option value="{{ g.id }}" {% if grupo_sel and grupo_sel.id == g.id %}selected{% endif %}>{{ g.semestre.nombre }} — Grupo {{ g.nombre }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="form-group">
+    <label>Buscar alumno</label>
+    <input type="text" id="busqueda" placeholder="Nombre o número de cuenta…" oninput="filtrarAlumnos()">
+  </div>
+</div>
+
+<div class="grid-2" style="gap:20px; align-items:start;">
+  <!-- Lista alumnos -->
+  <div class="card" style="padding:0; overflow:hidden;">
+    <div style="padding:16px 20px; border-bottom:1px solid var(--border-light); display:flex; align-items:center; justify-content:space-between;">
+      <span style="font-weight:700; font-size:14px;">Alumnos</span>
+      <span class="chip">{{ alumnos|length }}</span>
+    </div>
+    <div id="lista-alumnos" style="max-height:calc(100vh - 260px); overflow-y:auto;">
+      {% for alumno in alumnos %}
+      <div class="alumno-seg-item" onclick="seleccionarAlumno({{ alumno.id }}, '{{ alumno.nombre_completo|escapejs }}')"
+           data-nombre="{{ alumno.nombre_completo|lower }}" data-cuenta="{{ alumno.numero_cuenta }}"
+           style="padding:12px 20px; cursor:pointer; border-bottom:1px solid var(--border-light); transition:background .12s; display:flex; align-items:center; justify-content:space-between;">
+        <div>
+          <div style="font-weight:600; font-size:13.5px;">{{ alumno.nombre_completo }}</div>
+          <div style="font-size:11px; color:var(--text-muted);">{{ alumno.numero_cuenta }}</div>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          {% if alumno.notas.count %}
+          <span class="badge badge-primary">{{ alumno.notas.count }} notas</span>
+          {% endif %}
+          {% if alumno.promedio_general is not None %}
+          <span class="score {% if alumno.promedio_general >= 7 %}score-high{% elif alumno.promedio_general >= 6 %}score-med{% else %}score-low{% endif %}" style="font-size:14px;">{{ alumno.promedio_general }}</span>
+          {% endif %}
+        </div>
+      </div>
+      {% empty %}
+      <div style="padding:32px; text-align:center; color:var(--text-muted);">Sin alumnos para mostrar</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Panel notas -->
+  <div id="panel-notas" style="display:none;">
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+        <div style="width:44px; height:44px; background:linear-gradient(135deg,var(--primary),var(--secondary)); border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:20px; color:white;">·</div>
+        <div>
+          <div id="alumno-nombre-panel" style="font-weight:700; font-size:16px;"></div>
+          <div id="alumno-prom-panel" style="font-size:13px; color:var(--text-muted);"></div>
+        </div>
+      </div>
+
+      <div class="section-title">Agregar Nota</div>
+      <form id="form-nota" onsubmit="agregarNota(event)">
+        {% csrf_token %}
+        <input type="hidden" id="nota-alumno-id" name="alumno_id">
+        <div style="display:flex; gap:8px; margin-bottom:8px;">
+          <select name="tipo" id="nota-tipo" style="flex:0 0 auto;">
+            <option value="observacion">· Observación</option>
+            <option value="seguimiento">↺ Seguimiento</option>
+            <option value="alerta">! Alerta</option>
+            <option value="logro"> Logro</option>
+          </select>
+        </div>
+        <textarea name="texto" id="nota-texto" rows="3" placeholder="Escribe tu nota aquí…" style="width:100%; margin-bottom:10px; resize:vertical;"></textarea>
+        <button type="submit" class="btn btn-primary btn-sm"> Agregar Nota</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Historial de Notas</div>
+      <div id="historial-notas">
+        <div style="text-align:center; padding:20px; color:var(--text-muted); font-size:13px;">Selecciona un alumno para ver sus notas</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="placeholder-notas" class="card" style="text-align:center; padding:48px;">
+    <div style="font-size:36px; margin-bottom:12px;"></div>
+    <div style="font-weight:700; font-size:15px; margin-bottom:6px;">Selecciona un alumno</div>
+    <div style="color:var(--text-muted); font-size:13px;">Haz clic en un alumno para ver su perfil y agregar notas</div>
+  </div>
+</div>
+
+<script>
+let alumnoActualId = null;
+
+function filtrarAlumnos() {
+  const q = document.getElementById('busqueda').value.toLowerCase();
+  document.querySelectorAll('.alumno-seg-item').forEach(el => {
+    const nombre = el.dataset.nombre;
+    const cuenta = el.dataset.cuenta;
+    el.style.display = (nombre.includes(q) || cuenta.includes(q)) ? '' : 'none';
+  });
+}
+
+function seleccionarAlumno(id, nombre) {
+  alumnoActualId = id;
+  document.querySelectorAll('.alumno-seg-item').forEach(el => el.style.background='');
+  event.currentTarget.style.background = '#eef2ff';
+  document.getElementById('nota-alumno-id').value = id;
+  document.getElementById('alumno-nombre-panel').textContent = nombre;
+  document.getElementById('panel-notas').style.display = '';
+  document.getElementById('placeholder-notas').style.display = 'none';
+  cargarNotas(id);
+}
+
+async function cargarNotas(id) {
+  const resp = await fetch(`/seguimiento/notas/?alumno_id=${id}`);
+  const data = await resp.json();
+  const cont = document.getElementById('historial-notas');
+  const iconos = {observacion:'·', seguimiento:'↺', alerta:'!', logro:''};
+  const colores = {observacion:'nota-observacion', seguimiento:'nota-seguimiento', alerta:'nota-alerta', logro:'nota-logro'};
+  document.getElementById('alumno-prom-panel').textContent = data.promedio ? `Promedio: ${data.promedio}` : '';
+  if (!data.notas.length) {
+    cont.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:13px;">Sin notas registradas</div>';
+    return;
+  }
+  cont.innerHTML = data.notas.map(n => `
+    <div class="nota-card ${colores[n.tipo]||'nota-observacion'}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <span style="font-size:12px;font-weight:700;">${iconos[n.tipo]||'·'} ${n.tipo.charAt(0).toUpperCase()+n.tipo.slice(1)}</span>
+        <span style="font-size:11px;color:var(--text-muted);">${n.fecha}</span>
+      </div>
+      <div style="font-size:13px;color:var(--text-primary);">${n.texto}</div>
+    </div>
+  `).join('');
+}
+
+async function agregarNota(ev) {
+  ev.preventDefault();
+  const fd = new FormData(ev.target);
+  const resp = await fetch('/seguimiento/agregar-nota/', {
+    method: 'POST',
+    headers: {'X-CSRFToken': fd.get('csrfmiddlewaretoken'), 'Content-Type': 'application/json'},
+    body: JSON.stringify({alumno_id: fd.get('alumno_id'), tipo: fd.get('tipo'), texto: fd.get('texto')})
+  });
+  const data = await resp.json();
+  if (data.ok) {
+    document.getElementById('nota-texto').value = '';
+    cargarNotas(alumnoActualId);
+  }
+}
+</script>
+{% endblock %}

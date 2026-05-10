@@ -12,6 +12,7 @@ class Semestre(models.Model):
 
     class Meta:
         verbose_name_plural = "Semestres"
+        ordering = ['-anio']
 
 
 class Grupo(models.Model):
@@ -28,14 +29,16 @@ class Grupo(models.Model):
 class Alumno(models.Model):
     numero_cuenta = models.CharField(max_length=20, unique=True)
     nombre_completo = models.CharField(max_length=150)
-    email = models.EmailField()
+    email = models.EmailField(blank=True, default='')
     grupo = models.ForeignKey(Grupo, on_delete=models.SET_NULL, null=True, related_name='alumnos')
+    fecha_registro = models.DateTimeField(auto_now_add=True, null=True, blank=True)
 
     def __str__(self):
         return f"{self.numero_cuenta} - {self.nombre_completo}"
 
     class Meta:
         verbose_name_plural = "Alumnos"
+        ordering = ['nombre_completo']
 
 
 class Asignatura(models.Model):
@@ -56,18 +59,10 @@ class Calificacion(models.Model):
     alumno = models.ForeignKey(Alumno, on_delete=models.CASCADE, related_name='calificaciones')
     asignatura = models.ForeignKey(Asignatura, on_delete=models.CASCADE, related_name='calificaciones')
     parcial = models.IntegerField(choices=PARCIAL_CHOICES)
-    heteroevaluacion = models.DecimalField(
-        max_digits=5, decimal_places=2,
-        validators=[MinValueValidator(0), MaxValueValidator(10)]
-    )
-    coevaluacion = models.DecimalField(
-        max_digits=5, decimal_places=2,
-        validators=[MinValueValidator(0), MaxValueValidator(10)]
-    )
-    autoevaluacion = models.DecimalField(
-        max_digits=5, decimal_places=2,
-        validators=[MinValueValidator(0), MaxValueValidator(10)]
-    )
+    heteroevaluacion = models.DecimalField(max_digits=5, decimal_places=2, validators=[MinValueValidator(0), MaxValueValidator(10)])
+    coevaluacion = models.DecimalField(max_digits=5, decimal_places=2, validators=[MinValueValidator(0), MaxValueValidator(10)])
+    autoevaluacion = models.DecimalField(max_digits=5, decimal_places=2, validators=[MinValueValidator(0), MaxValueValidator(10)])
+    fecha_captura = models.DateTimeField(auto_now=True, null=True, blank=True)
 
     @property
     def promedio(self):
@@ -83,3 +78,17 @@ class Calificacion(models.Model):
     class Meta:
         unique_together = ('alumno', 'asignatura', 'parcial')
         verbose_name_plural = "Calificaciones"
+
+
+class Nota(models.Model):
+    """Notas/observaciones del tutor sobre un alumno"""
+    alumno = models.ForeignKey(Alumno, on_delete=models.CASCADE, related_name='notas')
+    texto = models.TextField()
+    fecha = models.DateTimeField(auto_now_add=True)
+    tipo = models.CharField(max_length=20, choices=[
+        ('observacion', 'Observación'), ('seguimiento', 'Seguimiento'),
+        ('alerta', 'Alerta'), ('logro', 'Logro'),
+    ], default='observacion')
+
+    class Meta:
+        ordering = ['-fecha']
