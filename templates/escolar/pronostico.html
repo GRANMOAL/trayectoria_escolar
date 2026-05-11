@@ -1,68 +1,60 @@
 {% extends 'escolar/base.html' %}
 {% block title %}Pronóstico IA{% endblock %}
 {% block content %}
-<style>
-.alumno-card { cursor:pointer; transition: border-color .2s, background .2s; }
-.alumno-card:hover { border-color: var(--accent) !important; background: rgba(0,229,255,0.03); }
-.alumno-card.open { border-color: var(--accent) !important; }
-.detalle-pron { display:none; margin-top:14px; border-top:1px solid var(--border); padding-top:14px; }
-.detalle-pron.visible { display:block; }
-.chevron { transition: transform .2s; }
-.chevron.rotado { transform: rotate(180deg); }
-</style>
-
 <div class="page-header">
-  <h2>Pronóstico con Inteligencia Artificial</h2>
-  <p>Predicción de calificaciones usando regresión lineal — haz clic en un alumno para ver el detalle</p>
+  <div class="page-header-text">
+    <h2>Pronóstico con IA</h2>
+    <p>Regresión lineal sobre parciales 1 y 2 para predecir el parcial 3 — mínimo aprobatorio: <strong>{{ minimo }}</strong></p>
+  </div>
+  {% if grupo_sel %}
+  <a href="{% url 'exportar_pronostico' %}?grupo={{ grupo_sel.id }}" class="btn btn-success btn-sm">Exportar pronóstico Excel</a>
+  {% endif %}
 </div>
 
-<div class="filter-bar">
+<div class="toolbar" style="margin-bottom:20px;">
   <div class="form-group">
     <label>Grupo</label>
     <select onchange="window.location.href='{% url 'pronostico' %}?grupo='+this.value">
-      <option value="">— Seleccionar grupo —</option>
-      {% for g in grupos %}
-      <option value="{{ g.id }}" {% if grupo_sel and grupo_sel.id == g.id %}selected{% endif %}>
-        {{ g.semestre.nombre }} — Grupo {{ g.nombre }}
-      </option>
-      {% endfor %}
+      <option value="">— Seleccionar —</option>
+      {% for g in grupos %}<option value="{{ g.id }}" {% if grupo_sel and grupo_sel.id == g.id %}selected{% endif %}>{{ g.semestre.nombre }} — Grupo {{ g.nombre }}</option>{% endfor %}
     </select>
   </div>
-  {% if grupo_sel %}
-  <a href="{% url 'exportar_pronostico' %}?grupo={{ grupo_sel.id }}" class="btn btn-success">↓ Exportar Pronóstico Excel</a>
-  {% endif %}
 </div>
 
 {% if grupo_sel %}
 
-<!-- Índices del grupo -->
+<!-- KPIs pronóstico -->
 <div class="stat-grid" style="margin-bottom:20px;">
-  <div class="stat-card accent">
-    <div class="stat-label">Total Alumnos</div>
+  <div class="stat-card sc-primary">
+    <div class="stat-card-blob"></div>
+    <div class="stat-label">Alumnos evaluados</div>
     <div class="stat-value">{{ stats_grupo.total }}</div>
   </div>
-  <div class="stat-card success">
-    <div class="stat-label">Pronóstico Aprobados</div>
+  <div class="stat-card sc-success">
+    <div class="stat-card-blob"></div>
+    <div class="stat-label">Pronóstico aprobados</div>
     <div class="stat-value">{{ stats_grupo.aprobados }}</div>
-    <div class="stat-sub">{{ stats_grupo.pct_aprobacion }}% de aprobación estimada</div>
+    <div class="stat-sub">{{ stats_grupo.pct_aprobacion }}% estimado</div>
   </div>
-  <div class="stat-card danger">
-    <div class="stat-label">Pronóstico Reprobados</div>
+  <div class="stat-card sc-danger">
+    <div class="stat-card-blob"></div>
+    <div class="stat-label">Pronóstico reprobados</div>
     <div class="stat-value">{{ stats_grupo.reprobados }}</div>
-    <div class="stat-sub">{{ stats_grupo.pct_reprobacion }}% de reprobación estimada</div>
+    <div class="stat-sub">{{ stats_grupo.pct_reprobacion }}% estimado</div>
   </div>
 </div>
 
+<!-- Gráficas: pastel + riesgo, lado a lado -->
 <div class="charts-grid" style="margin-bottom:24px;">
-  {% if graficas.pastel_grupo %}
+  {% if graficas.pastel %}
   <div class="chart-card">
-    <h3>Índice del Grupo (Pronóstico IA)</h3>
-    <img src="data:image/png;base64,{{ graficas.pastel_grupo }}" alt="Índice grupo">
+    <h3>Distribución pronóstico del grupo</h3>
+    <img src="data:image/png;base64,{{ graficas.pastel }}" alt="Distribución">
   </div>
   {% endif %}
   {% if graficas.riesgo %}
   <div class="chart-card">
-    <h3>Alumnos en Riesgo por Asignatura</h3>
+    <h3>Alumnos en riesgo por asignatura</h3>
     <img src="data:image/png;base64,{{ graficas.riesgo }}" alt="Riesgo">
   </div>
   {% endif %}
@@ -71,30 +63,23 @@
 <!-- Índices por asignatura -->
 {% if indices_asig %}
 <div class="card" style="margin-bottom:24px;">
-  <div class="section-title">Índice de Aprobación / Reprobación por Asignatura</div>
+  <div class="section-title">Índice por asignatura (pronóstico)</div>
   <div class="table-wrap">
     <table>
-      <thead>
-        <tr><th>Asignatura</th><th>Clave</th><th>Promedio Pronosticado</th><th>Aprobados</th><th>Reprobados</th><th>% Aprobación</th></tr>
-      </thead>
+      <thead><tr><th>Asignatura</th><th>Promedio esperado</th><th>Aprobados</th><th>Reprobados</th><th>% Aprobación</th></tr></thead>
       <tbody>
         {% for item in indices_asig %}
         <tr>
-          <td style="font-weight:600;">{{ item.asignatura.nombre }}</td>
-          <td><span class="badge badge-accent" style="font-family:var(--font-mono);">{{ item.asignatura.clave }}</span></td>
-          <td>
-            <span class="score {% if item.promedio >= 8 %}score-high{% elif item.promedio >= 6 %}score-med{% else %}score-low{% endif %}">
-              {{ item.promedio }}
-            </span>
-          </td>
+          <td style="font-weight:600;">{{ item.asignatura.nombre }} <span class="badge badge-primary" style="margin-left:6px;">{{ item.asignatura.clave }}</span></td>
+          <td><span class="score {% if item.promedio >= minimo %}score-high{% elif item.promedio >= 5 %}score-med{% else %}score-low{% endif %}">{{ item.promedio }}</span></td>
           <td><span class="badge badge-success">{{ item.aprobados }}</span></td>
           <td><span class="badge badge-danger">{{ item.reprobados }}</span></td>
           <td>
-            <div style="display:flex; align-items:center; gap:8px;">
-              <div style="background:var(--bg-secondary); border-radius:100px; height:6px; flex:1; overflow:hidden; min-width:60px;">
-                <div style="background:{% if item.pct_aprobacion >= 60 %}var(--success){% else %}var(--danger){% endif %}; width:{{ item.pct_aprobacion }}%; height:100%; border-radius:100px;"></div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div style="flex:1;min-width:60px;background:var(--border-light);border-radius:100px;height:6px;overflow:hidden;">
+                <div style="height:100%;border-radius:100px;width:{{ item.pct_aprobacion }}%;background:{% if item.pct_aprobacion >= 60 %}var(--success){% else %}var(--danger){% endif %};transition:width 1s;"></div>
               </div>
-              <span style="font-family:var(--font-mono); font-size:12px; font-weight:700;">{{ item.pct_aprobacion }}%</span>
+              <span style="font-size:12px;font-weight:700;">{{ item.pct_aprobacion }}%</span>
             </div>
           </td>
         </tr>
@@ -105,110 +90,107 @@
 </div>
 {% endif %}
 
-<!-- Lista de alumnos colapsable -->
-<div style="display:flex; gap:10px; margin-bottom:14px; align-items:center; flex-wrap:wrap;">
-  <div class="section-title" style="border:none; padding:0; margin:0;">Pronóstico por Alumno</div>
-  <div class="badge badge-success">↑ Mejora</div>
-  <div class="badge badge-danger">↓ Baja</div>
-  <div class="badge badge-warning">→ Estable</div>
-  <button onclick="expandirTodos()" class="btn" style="font-size:11px; padding:5px 12px; background:var(--bg-secondary); color:var(--text-muted); border:1px solid var(--border); margin-left:auto;">Expandir todo</button>
-  <button onclick="colapsarTodos()" class="btn" style="font-size:11px; padding:5px 12px; background:var(--bg-secondary); color:var(--text-muted); border:1px solid var(--border);">Colapsar todo</button>
+<!-- Alumnos colapsables -->
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px;">
+  <div style="font-size:13px;font-weight:700;color:var(--text-primary);">Pronóstico por alumno <span style="color:var(--text-muted);font-weight:500;">(clic para ver detalle)</span></div>
+  <div style="display:flex;gap:8px;">
+    <button onclick="expandirTodos()" class="btn btn-secondary btn-sm">Expandir todo</button>
+    <button onclick="colapsarTodos()" class="btn btn-secondary btn-sm">Colapsar todo</button>
+  </div>
 </div>
 
 {% for dato in resultado %}
-<div class="card alumno-card" id="card-{{ forloop.counter }}" style="margin-bottom:12px; border:1px solid var(--border);"
-     onclick="toggleDetalle({{ forloop.counter }})">
-  <div style="display:flex; justify-content:space-between; align-items:center;">
-    <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+<div class="alumno-pron-card" id="acard-{{ forloop.counter }}">
+  <div class="alumno-pron-header" onclick="toggle({{ forloop.counter }})">
+    <div style="display:flex;align-items:center;gap:12px;flex:1;flex-wrap:wrap;">
+      <div style="width:36px;height:36px;background:linear-gradient(135deg,var(--primary),var(--secondary));border-radius:10px;display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:13px;flex-shrink:0;">
+        {{ forloop.counter }}
+      </div>
       <div>
-        <span style="font-weight:700; font-size:14px;">{{ dato.alumno.nombre_completo }}</span>
-        <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted); margin-left:10px;">{{ dato.alumno.numero_cuenta }}</span>
+        <div style="font-weight:700;font-size:14px;">{{ dato.alumno.nombre_completo }}</div>
+        <div style="font-size:11px;color:var(--text-muted);">{{ dato.alumno.numero_cuenta }}</div>
       </div>
       {% if dato.promedio_global is not None %}
-      <span class="score {% if dato.promedio_global >= 8 %}score-high{% elif dato.promedio_global >= 6 %}score-med{% else %}score-low{% endif %}" style="font-size:18px;">
+      <div style="font-family:'Fraunces',serif;font-size:22px;font-weight:700;color:{% if dato.promedio_global >= minimo %}var(--success){% else %}var(--danger){% endif %};">
         {{ dato.promedio_global }}
-      </span>
-      <span class="badge {% if dato.promedio_global >= 6 %}badge-success{% else %}badge-danger{% endif %}">
-        {% if dato.promedio_global >= 6 %} Aprobado{% else %} Reprobado{% endif %}
+      </div>
+      <span class="badge {% if dato.promedio_global >= minimo %}badge-success{% else %}badge-danger{% endif %}">
+        {% if dato.promedio_global >= minimo %}Aprobado{% else %}En riesgo{% endif %}
       </span>
       {% endif %}
-      {% for a in dato.asignaturas %}{% if a.riesgo %}<span class="badge badge-danger" style="font-size:10px;">!{{ a.asignatura.clave }}</span>{% endif %}{% endfor %}
+      {% for a in dato.asignaturas %}{% if a.riesgo %}<span class="badge badge-danger" style="font-size:10px;">{{ a.asignatura.clave }}</span>{% endif %}{% endfor %}
     </div>
-    <span class="chevron" id="chev-{{ forloop.counter }}" style="font-size:18px; color:var(--text-muted); user-select:none;">▾</span>
+    <svg id="chev-{{ forloop.counter }}" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" style="flex-shrink:0;transition:transform .25s;"><polyline points="6,9 12,15 18,9"/></svg>
   </div>
 
-  <div class="detalle-pron" id="det-{{ forloop.counter }}" onclick="event.stopPropagation()">
-    <table style="width:100%;">
-      <thead>
-        <tr>
-          <th>Asignatura</th>
-          <th>P1</th><th>P2</th><th>P3</th>
-          <th>Pronóstico P3 (IA)</th>
-          <th>Tendencia</th>
-          <th>Estado</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for a in dato.asignaturas %}
-        <tr {% if a.riesgo %}style="background:rgba(255,68,68,0.05)"{% endif %}>
-          <td style="font-weight:600;">{{ a.asignatura.nombre }}</td>
-          {% for p in a.promedios %}
-          <td class="score {% if p >= 8 %}score-high{% elif p >= 6 %}score-med{% else %}score-low{% endif %}" style="text-align:center;">{{ p }}</td>
+  <div class="alumno-pron-detail" id="det-{{ forloop.counter }}">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Asignatura</th><th>P1</th><th>P2</th><th>P3</th><th>Pronóstico P3</th><th>Tendencia</th><th>Estado</th></tr></thead>
+        <tbody>
+          {% for a in dato.asignaturas %}
+          <tr style="{% if a.riesgo %}background:#fff5f5;{% endif %}">
+            <td style="font-weight:600;">{{ a.asignatura.nombre }}</td>
+            {% for p in a.promedios %}
+            <td style="text-align:center;font-weight:700;font-size:13px;color:{% if p >= minimo %}var(--success){% else %}var(--danger){% endif %};">{{ p }}</td>
+            {% endfor %}
+            {% if a.promedios|length < 1 %}<td style="text-align:center;color:var(--text-light);">—</td>{% endif %}
+            {% if a.promedios|length < 2 %}<td style="text-align:center;color:var(--text-light);">—</td>{% endif %}
+            {% if a.promedios|length < 3 %}<td style="text-align:center;color:var(--text-light);">—</td>{% endif %}
+            <td style="text-align:center;">
+              {% if a.pronostico is not None %}
+              <span style="font-family:'Fraunces',serif;font-size:17px;font-weight:700;color:{% if a.pronostico >= minimo %}var(--success){% else %}var(--danger){% endif %};">{{ a.pronostico }}</span>
+              {% else %}<span style="color:var(--text-light);">N/D</span>{% endif %}
+            </td>
+            <td style="text-align:center;">
+              {% if a.tendencia == 'sube' %}
+              <span class="badge badge-success">↑ Sube</span>
+              {% elif a.tendencia == 'baja' %}
+              <span class="badge badge-danger">↓ Baja</span>
+              {% elif a.tendencia == 'estable' %}
+              <span class="badge badge-amber">→ Estable</span>
+              {% else %}
+              <span class="badge badge-gray">Sin datos</span>
+              {% endif %}
+            </td>
+            <td style="text-align:center;">
+              {% if a.riesgo %}<span class="badge badge-danger">Riesgo</span>
+              {% elif a.pronostico is not None %}<span class="badge badge-success">OK</span>
+              {% else %}<span class="badge badge-gray">—</span>{% endif %}
+            </td>
+          </tr>
           {% endfor %}
-          {% if a.promedios|length < 1 %}<td style="color:var(--text-muted); text-align:center;">—</td>{% endif %}
-          {% if a.promedios|length < 2 %}<td style="color:var(--text-muted); text-align:center;">—</td>{% endif %}
-          {% if a.promedios|length < 3 %}<td style="color:var(--text-muted); text-align:center;">—</td>{% endif %}
-          <td style="text-align:center;">
-            {% if a.pronostico is not None %}
-            <span class="score {% if a.pronostico >= 8 %}score-high{% elif a.pronostico >= 6 %}score-med{% else %}score-low{% endif %}" style="font-size:15px; font-weight:800;">
-              {{ a.pronostico }}
-            </span>
-            {% else %}<span style="color:var(--text-muted);">N/D</span>{% endif %}
-          </td>
-          <td style="text-align:center;">
-            <span class="{% if a.tendencia == 'mejora' %}tendencia-mejora{% elif a.tendencia == 'baja' %}tendencia-baja{% else %}tendencia-estable{% endif %}" style="font-weight:700; font-size:13px;">
-              {% if a.tendencia == 'mejora' %}↑ Mejora{% elif a.tendencia == 'baja' %}↓ Baja{% elif a.tendencia == 'estable' %}→ Estable{% else %}—{% endif %}
-            </span>
-          </td>
-          <td style="text-align:center;">
-            {% if a.riesgo %}<span class="badge badge-danger">!Riesgo</span>
-            {% elif a.pronostico is not None %}<span class="badge badge-success"> OK</span>
-            {% else %}<span class="badge" style="background:rgba(255,255,255,0.05); color:var(--text-muted);">Sin datos</span>{% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 {% endfor %}
 
 <script>
-function toggleDetalle(n) {
-  const det = document.getElementById('det-' + n);
-  const chev = document.getElementById('chev-' + n);
-  const card = document.getElementById('card-' + n);
-  det.classList.toggle('visible');
-  chev.classList.toggle('rotado');
-  card.classList.toggle('open');
+function toggle(n) {
+  const det = document.getElementById('det-'+n);
+  const chev = document.getElementById('chev-'+n);
+  const open = det.classList.toggle('open');
+  chev.style.transform = open ? 'rotate(180deg)' : '';
 }
 function expandirTodos() {
-  document.querySelectorAll('.detalle-pron').forEach(d => d.classList.add('visible'));
-  document.querySelectorAll('.chevron').forEach(c => c.classList.add('rotado'));
-  document.querySelectorAll('.alumno-card').forEach(c => c.classList.add('open'));
+  document.querySelectorAll('.alumno-pron-detail').forEach(d => d.classList.add('open'));
+  document.querySelectorAll('[id^="chev-"]').forEach(c => c.style.transform='rotate(180deg)');
 }
 function colapsarTodos() {
-  document.querySelectorAll('.detalle-pron').forEach(d => d.classList.remove('visible'));
-  document.querySelectorAll('.chevron').forEach(c => c.classList.remove('rotado'));
-  document.querySelectorAll('.alumno-card').forEach(c => c.classList.remove('open'));
+  document.querySelectorAll('.alumno-pron-detail').forEach(d => d.classList.remove('open'));
+  document.querySelectorAll('[id^="chev-"]').forEach(c => c.style.transform='');
 }
 </script>
 
 {% else %}
-<div style="text-align:center; padding:60px; color:var(--text-muted);">
-  <div style="font-size:40px; margin-bottom:16px;">◇</div>
-  <div style="font-size:16px; font-weight:700; margin-bottom:8px;">Selecciona un Grupo</div>
-  <div style="font-size:13px;">Para generar pronósticos con IA</div>
+<div class="card" style="text-align:center;padding:52px;border:2px dashed var(--border);">
+  <div style="width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,var(--primary),var(--secondary));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
+  </div>
+  <div style="font-weight:700;font-size:15px;margin-bottom:6px;">Selecciona un grupo</div>
+  <div style="color:var(--text-muted);font-size:13px;">El pronóstico IA se generará a partir de los parciales registrados</div>
 </div>
 {% endif %}
 {% endblock %}

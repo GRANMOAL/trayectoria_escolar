@@ -70,7 +70,7 @@ class Calificacion(models.Model):
 
     @property
     def aprobado(self):
-        return self.promedio >= 6.0
+        return self.promedio >= 7.0
 
     def __str__(self):
         return f"{self.alumno} - {self.asignatura} - P{self.parcial}"

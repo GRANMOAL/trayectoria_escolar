@@ -2,188 +2,157 @@
 {% block title %}Indicadores{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h2>Indicadores de Trayectoria Escolar</h2>
-  <p>Promedio de grupo · Asignatura · Alumno — Índices de aprobación / reprobación</p>
+  <div class="page-header-text">
+    <h2>Indicadores de Trayectoria</h2>
+    <p>Promedios, índices y tendencias del grupo — mínimo aprobatorio: <strong>{{ minimo }}</strong></p>
+  </div>
 </div>
 
-<div class="filter-bar">
+<!-- Filtros -->
+<div class="toolbar">
   <div class="form-group">
     <label>Grupo</label>
-    <select id="grupo-sel">
-      <option value="">— Seleccionar grupo —</option>
-      {% for g in grupos %}
-      <option value="{{ g.id }}" {% if grupo_sel and grupo_sel.id == g.id %}selected{% endif %}>
-        {{ g.semestre.nombre }} — Grupo {{ g.nombre }}
-      </option>
-      {% endfor %}
+    <select id="grupo-sel" onchange="recargar()">
+      <option value="">— Seleccionar —</option>
+      {% for g in grupos %}<option value="{{ g.id }}" {% if grupo_sel and grupo_sel.id == g.id %}selected{% endif %}>{{ g.semestre.nombre }} — Grupo {{ g.nombre }}</option>{% endfor %}
     </select>
   </div>
   {% if grupo_sel %}
   <div class="form-group">
-    <label>Filtrar Asignatura</label>
-    <select id="asig-sel">
-      <option value="">— Todas —</option>
-      {% for a in asignaturas_lista %}
-      <option value="{{ a.id }}" {% if asig_filtro == a.id|stringformat:"s" %}selected{% endif %}>{{ a.nombre }}</option>
-      {% endfor %}
+    <label>Asignatura</label>
+    <select id="asig-sel" onchange="recargar()">
+      <option value="">Todas</option>
+      {% for a in asignaturas_lista %}<option value="{{ a.id }}" {% if asig_filtro == a.id|stringformat:"s" %}selected{% endif %}>{{ a.nombre }}</option>{% endfor %}
     </select>
   </div>
   <div class="form-group">
-    <label>Filtrar Parcial</label>
-    <select id="parcial-sel">
-      <option value="">— Todos —</option>
-      {% for p in "123" %}
-      <option value="{{ p }}" {% if parcial_filtro == p %}selected{% endif %}>Parcial {{ p }}</option>
-      {% endfor %}
+    <label>Parcial</label>
+    <select id="parcial-sel" onchange="recargar()">
+      <option value="">Todos</option>
+      {% for p in "123" %}<option value="{{ p }}" {% if parcial_filtro == p %}selected{% endif %}>Parcial {{ p }}</option>{% endfor %}
     </select>
   </div>
-  {% endif %}
-  <button class="btn btn-primary" onclick="aplicarFiltros()">Aplicar</button>
-  {% if grupo_sel %}
-  <a href="{% url 'exportar_excel' %}?grupo={{ grupo_sel.id }}" class="btn btn-success">↓ Exportar Excel</a>
+  <a href="{% url 'exportar_excel' %}?grupo={{ grupo_sel.id }}" class="btn btn-success btn-sm">Exportar Excel</a>
   {% endif %}
 </div>
 
 <script>
-function aplicarFiltros() {
+function recargar() {
   const g = document.getElementById('grupo-sel').value;
   if (!g) return;
-  const a = document.getElementById('asig-sel') ? document.getElementById('asig-sel').value : '';
-  const p = document.getElementById('parcial-sel') ? document.getElementById('parcial-sel').value : '';
+  const a = document.getElementById('asig-sel')?.value || '';
+  const p = document.getElementById('parcial-sel')?.value || '';
   let url = '{% url "indicadores" %}?grupo=' + g;
   if (a) url += '&asignatura=' + a;
   if (p) url += '&parcial=' + p;
   window.location.href = url;
 }
 document.getElementById('grupo-sel').addEventListener('change', function() {
-  if (this.value) window.location.href = '{% url "indicadores" %}?grupo=' + this.value;
+  if (this.value && !document.getElementById('asig-sel'))
+    window.location.href = '{% url "indicadores" %}?grupo=' + this.value;
 });
 </script>
 
 {% if grupo_sel %}
+
+<!-- KPIs -->
 <div class="stat-grid">
-  <div class="stat-card accent">
-    <div class="stat-label">Total Alumnos</div>
+  <div class="stat-card sc-primary">
+    <div class="stat-card-blob"></div>
+    <div class="stat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+    <div class="stat-label">Total alumnos</div>
     <div class="stat-value">{{ stats.total }}</div>
-    <div class="stat-sub">en el grupo</div>
   </div>
-  <div class="stat-card success">
-    <div class="stat-label">Alumnos Aprobados</div>
+  <div class="stat-card sc-success">
+    <div class="stat-card-blob"></div>
+    <div class="stat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="20,6 9,17 4,12"/></svg></div>
+    <div class="stat-label">Aprobados</div>
     <div class="stat-value">{{ stats.aprobados }}</div>
-    <div class="stat-sub">{{ stats.pct_aprobacion }}% de aprobación</div>
+    <div class="stat-sub">{{ stats.pct_aprobacion }}% del grupo</div>
+    <div class="progress-bar-wrap"><div class="progress-bar-fill" style="background:var(--success);width:0" data-pct="{{ stats.pct_aprobacion }}"></div></div>
   </div>
-  <div class="stat-card danger">
-    <div class="stat-label">Alumnos Reprobados</div>
+  <div class="stat-card sc-danger">
+    <div class="stat-card-blob"></div>
+    <div class="stat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+    <div class="stat-label">Reprobados</div>
     <div class="stat-value">{{ stats.reprobados }}</div>
-    <div class="stat-sub">{{ stats.pct_reprobacion }}% de reprobación</div>
+    <div class="stat-sub">{{ stats.pct_reprobacion }}% del grupo</div>
+    <div class="progress-bar-wrap"><div class="progress-bar-fill" style="background:var(--danger);width:0" data-pct="{{ stats.pct_reprobacion }}"></div></div>
   </div>
-  <div class="stat-card warning">
-    <div class="stat-label">Promedio del Grupo</div>
+  <div class="stat-card sc-amber">
+    <div class="stat-card-blob"></div>
+    <div class="stat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg></div>
+    <div class="stat-label">Promedio del grupo</div>
     <div class="stat-value">{{ stats.promedio_grupo }}</div>
     <div class="stat-sub">calificación general{% if asig_filtro or parcial_filtro %} (filtrado){% endif %}</div>
   </div>
 </div>
 
+<!-- Gráficas: 2 en una fila, sin repetición -->
 <div class="charts-grid">
   {% if graficas.pastel %}
   <div class="chart-card">
-    <h3>Índice Aprobación / Reprobación</h3>
-    <img src="data:image/png;base64,{{ graficas.pastel }}" alt="Pastel">
+    <h3>Aprobación vs Reprobación</h3>
+    <img src="data:image/png;base64,{{ graficas.pastel }}" alt="Aprobación">
   </div>
   {% endif %}
-  {% if graficas.parciales %}
+  {% if graficas.evolucion %}
   <div class="chart-card">
-    <h3>Evolución por Parcial</h3>
-    <img src="data:image/png;base64,{{ graficas.parciales }}" alt="Parciales">
+    <h3>Evolución del grupo por parcial</h3>
+    <img src="data:image/png;base64,{{ graficas.evolucion }}" alt="Evolución">
   </div>
   {% endif %}
 </div>
 
 {% if graficas.alumnos %}
-<div class="chart-card" style="margin-top:20px;">
-  <h3>Promedio por Alumno</h3>
+<div class="chart-card" style="margin-bottom:20px;">
+  <h3>Ranking de alumnos — de mayor a menor promedio</h3>
   <img src="data:image/png;base64,{{ graficas.alumnos }}" alt="Alumnos">
 </div>
 {% endif %}
 
-{% if graficas.asignaturas %}
-<div class="chart-card" style="margin-top:20px;">
-  <h3>Promedio Comparativo por Asignatura</h3>
-  <img src="data:image/png;base64,{{ graficas.asignaturas }}" alt="Asignaturas">
+{% if graficas.calor %}
+<div class="chart-card" style="margin-bottom:20px;">
+  <h3>Mapa de calor — promedios por asignatura y parcial</h3>
+  <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">Verde = alto, Rojo = bajo, — = sin datos</p>
+  <img src="data:image/png;base64,{{ graficas.calor }}" alt="Mapa de calor">
 </div>
 {% endif %}
 
-<!-- Resumen dinámico por asignatura -->
+<!-- Tabla resumen asignaturas -->
 {% if asignaturas_resumen %}
-<div class="card" style="margin-top:24px;">
-  <div class="section-title">Resumen por Asignatura{% if parcial_filtro %} — Parcial {{ parcial_filtro }}{% endif %}</div>
+<div class="card">
+  <div class="section-title">Resumen por asignatura{% if parcial_filtro %} — Parcial {{ parcial_filtro }}{% endif %}</div>
   <div class="table-wrap">
     <table>
       <thead>
-        <tr>
-          <th>Asignatura</th>
-          <th>Clave</th>
-          <th>Promedio</th>
-          <th>Aprobados</th>
-          <th>Reprobados</th>
-          <th>% Aprobación</th>
-          <th>P1</th><th>P2</th><th>P3</th>
-        </tr>
+        <tr><th>Asignatura</th><th>Clave</th><th>Promedio</th><th>Aprobados</th><th>Reprobados</th><th>% Aprobación</th><th>P1</th><th>P2</th><th>P3</th></tr>
       </thead>
       <tbody>
         {% for item in asignaturas_resumen %}
         <tr>
           <td style="font-weight:600;">{{ item.asignatura.nombre }}</td>
-          <td><span class="badge badge-accent" style="font-family:var(--font-mono);">{{ item.asignatura.clave }}</span></td>
-          <td>
-            <span class="score {% if item.promedio >= 8 %}score-high{% elif item.promedio >= 6 %}score-med{% else %}score-low{% endif %}">
-              {{ item.promedio }}
-            </span>
-          </td>
+          <td><span class="badge badge-primary">{{ item.asignatura.clave }}</span></td>
+          <td><span class="score {% if item.promedio >= minimo %}score-high{% elif item.promedio >= 5 %}score-med{% else %}score-low{% endif %}">{{ item.promedio }}</span></td>
           <td><span class="badge badge-success">{{ item.aprobados }}</span></td>
           <td><span class="badge badge-danger">{{ item.reprobados }}</span></td>
           <td>
-            <div style="display:flex; align-items:center; gap:8px;">
-              <div style="background:var(--bg-secondary); border-radius:100px; height:6px; flex:1; overflow:hidden;">
-                <div style="background:{% if item.pct_aprobacion >= 60 %}var(--success){% else %}var(--danger){% endif %}; width:{{ item.pct_aprobacion }}%; height:100%; border-radius:100px;"></div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div style="flex:1;background:var(--border-light);border-radius:100px;height:6px;overflow:hidden;">
+                <div style="height:100%;border-radius:100px;width:{{ item.pct_aprobacion }}%;background:{% if item.pct_aprobacion >= 60 %}var(--success){% else %}var(--danger){% endif %};transition:width 1s ease;"></div>
               </div>
-              <span style="font-family:var(--font-mono); font-size:12px; font-weight:700;">{{ item.pct_aprobacion }}%</span>
+              <span style="font-size:12px;font-weight:700;">{{ item.pct_aprobacion }}%</span>
             </div>
           </td>
-          <td style="font-family:var(--font-mono); font-size:12px; text-align:center;">
-            {% if item.por_parcial.1 %}<span class="{% if item.por_parcial.1 >= 6 %}score-high{% else %}score-low{% endif %}">{{ item.por_parcial.1 }}</span>{% else %}—{% endif %}
+          <td style="text-align:center;font-size:13px;font-weight:700;color:{% if item.por_parcial.1 %}{% if item.por_parcial.1 >= minimo %}var(--success){% else %}var(--danger){% endif %}{% else %}var(--text-light){% endif %};">
+            {% if item.por_parcial.1 %}{{ item.por_parcial.1 }}{% else %}—{% endif %}
           </td>
-          <td style="font-family:var(--font-mono); font-size:12px; text-align:center;">
-            {% if item.por_parcial.2 %}<span class="{% if item.por_parcial.2 >= 6 %}score-high{% else %}score-low{% endif %}">{{ item.por_parcial.2 }}</span>{% else %}—{% endif %}
+          <td style="text-align:center;font-size:13px;font-weight:700;color:{% if item.por_parcial.2 %}{% if item.por_parcial.2 >= minimo %}var(--success){% else %}var(--danger){% endif %}{% else %}var(--text-light){% endif %};">
+            {% if item.por_parcial.2 %}{{ item.por_parcial.2 }}{% else %}—{% endif %}
           </td>
-          <td style="font-family:var(--font-mono); font-size:12px; text-align:center;">
-            {% if item.por_parcial.3 %}<span class="{% if item.por_parcial.3 >= 6 %}score-high{% else %}score-low{% endif %}">{{ item.por_parcial.3 }}</span>{% else %}—{% endif %}
+          <td style="text-align:center;font-size:13px;font-weight:700;color:{% if item.por_parcial.3 %}{% if item.por_parcial.3 >= minimo %}var(--success){% else %}var(--danger){% endif %}{% else %}var(--text-light){% endif %};">
+            {% if item.por_parcial.3 %}{{ item.por_parcial.3 }}{% else %}—{% endif %}
           </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-{% endif %}
-
-{% if stats.asig_reprobadas %}
-<div class="card" style="margin-top:20px;">
-  <div class="section-title">Asignaturas con Alumnos Reprobados</div>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr><th>Asignatura</th><th>Clave</th><th>Promedio</th><th>Reprobados</th><th>Alumnos</th><th>Pronóstico</th></tr>
-      </thead>
-      <tbody>
-        {% for item in stats.asig_reprobadas %}
-        <tr>
-          <td style="font-weight:600;">{{ item.asignatura.nombre }}</td>
-          <td><span class="badge badge-accent" style="font-family:var(--font-mono);">{{ item.asignatura.clave }}</span></td>
-          <td><span class="score {% if item.promedio >= 7 %}score-high{% elif item.promedio >= 6 %}score-med{% else %}score-low{% endif %}">{{ item.promedio }}</span></td>
-          <td><span class="badge badge-danger">{{ item.total_reprobados }}</span></td>
-          <td style="font-size:12px; color:var(--text-muted);">{% for a in item.alumnos %}{{ a }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
-          <td style="font-size:13px; font-weight:600;">{{ item.pronostico }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -193,10 +162,12 @@ document.getElementById('grupo-sel').addEventListener('change', function() {
 {% endif %}
 
 {% else %}
-<div style="text-align:center; padding:60px; color:var(--text-muted);">
-  <div style="font-size:40px; margin-bottom:16px;">◆</div>
-  <div style="font-size:16px; font-weight:700; margin-bottom:8px;">Selecciona un Grupo</div>
-  <div style="font-size:13px;">Para ver los indicadores de trayectoria</div>
+<div class="card" style="text-align:center;padding:52px;border:2px dashed var(--border);">
+  <div style="width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,var(--primary),var(--secondary));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+  </div>
+  <div style="font-weight:700;font-size:15px;margin-bottom:6px;">Selecciona un grupo</div>
+  <div style="color:var(--text-muted);font-size:13px;">Los indicadores, gráficas y resumen por asignatura aparecerán aquí</div>
 </div>
 {% endif %}
 {% endblock %}
