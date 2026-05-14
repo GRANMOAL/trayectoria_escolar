@@ -75,6 +75,32 @@ trayectoria_escolar/
 └── manage.py
 ```
 
+## Imagenes del Proyecto
+1. Dashboard
+<img width="2556" height="1171" alt="image" src="https://github.com/user-attachments/assets/3468a80b-4325-44ee-8d32-f7c60010e212" />
+
+2. Lista de Alumnos
+<img width="2559" height="1172" alt="image" src="https://github.com/user-attachments/assets/dca33dc9-fd9a-4ea6-b457-6cc3d040545d" />
+
+4. Calificaciones
+<img width="2559" height="1169" alt="image" src="https://github.com/user-attachments/assets/4fb187a4-af10-466b-9aee-a40a181e0706" />
+
+6. Indicadores
+<img width="2557" height="1165" alt="image" src="https://github.com/user-attachments/assets/ec18dea6-89ae-4b08-84b4-9ef1858d2deb" />
+
+8. Pronostico IA
+<img width="2556" height="1155" alt="image" src="https://github.com/user-attachments/assets/70c7e6a0-f76b-4252-a109-3f254690a05e" />
+
+10. Captura rapida
+<img width="2557" height="1169" alt="image" src="https://github.com/user-attachments/assets/32757236-803e-42e1-a92f-0866f40e60ae" />
+
+12. Seguimiento
+<img width="2558" height="1159" alt="image" src="https://github.com/user-attachments/assets/13dbf300-368f-4b30-8d98-4cad7cff9041" />
+
+14. Panel Tutor
+<img width="2540" height="1144" alt="image" src="https://github.com/user-attachments/assets/7c480bf0-c51b-440b-96a3-99b7b24b52db" />
+
+
 ## Flujo de Trabajo
 
 1. **Admin** → Crear Semestre, Grupos, Asignaturas y Alumnos
