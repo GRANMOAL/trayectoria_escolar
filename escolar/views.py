@@ -398,13 +398,28 @@ def indicadores(request):
                 cp = [c for c in cals if c.parcial == p]
                 if cp:
                     por_parcial[p] = round(sum(c.promedio for c in cp) / len(cp), 2)
+            promedio_final = None
+
+            if all(p in por_parcial for p in [1, 2, 3]):
+                promedio_final = round(
+                    (
+                        por_parcial[1] +
+                        por_parcial[2] +
+                        por_parcial[3]
+                    ) / 3,
+                    2
+                )
+
             asignaturas_resumen.append({
-                'asignatura': asig, 'total': len(set(c.alumno_id for c in cals)),
-                'aprobados': ap, 'reprobados': rep, 'promedio': prom,
+                'asignatura': asig,
+                'total': len(set(c.alumno_id for c in cals)),
+                'aprobados': ap,
+                'reprobados': rep,
+                'promedio': prom,
                 'pct_aprobacion': round(ap / len(cals) * 100, 1) if cals else 0,
                 'por_parcial': por_parcial,
+                'promedio_final': promedio_final,
             })
-
         # Gráfica 1: Pastel aprobación (solo si hay datos)
         if stats['total']:
             graficas['pastel'] = grafica_pastel_aprobacion(stats['aprobados'], stats['reprobados'])
