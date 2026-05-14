@@ -773,43 +773,62 @@ def exportar_calificaciones_excel(request):
     asig_id = request.GET.get('asignatura')
     parcial = request.GET.get('parcial')
 
-    grupo = Grupo.objects.get(id=grupo_id)
-    asignatura = Asignatura.objects.get(id=asig_id)
-    
-    # Crear el libro de Excel
+    if not all([grupo_id, asig_id, parcial]):
+        messages.error(request, 'Faltan parámetros para exportar.')
+        return redirect('captura_rapida')
+
+    grupo = get_object_or_404(Grupo, id=grupo_id)
+    asignatura = get_object_or_404(Asignatura, id=asig_id)
+
+    e = estilo_excel()
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = f"Parcial {parcial}"
 
+    # Título
+    ws.merge_cells('A1:F1')
+    ws['A1'] = f'{asignatura.nombre} ({asignatura.clave}) — {grupo.semestre.nombre} — Grupo {grupo.nombre} — Parcial {parcial}'
+    ws['A1'].font = Font(bold=True, color='FFFFFF', size=12)
+    ws['A1'].fill = e['title_fill']
+    ws['A1'].alignment = e['center']
+    ws.row_dimensions[1].height = 26
+
     # Encabezados
-    columns = ['No. Cuenta', 'Nombre Completo', 'Hetero', 'Co-eval', 'Auto-eval', 'Promedio']
-    ws.append(columns)
+    for col, h in enumerate(['No. Cuenta', 'Nombre Completo', 'Hetero', 'Co-eval', 'Auto-eval', 'Promedio'], 1):
+        c = ws.cell(row=2, column=col, value=h)
+        c.font = e['header_font']
+        c.fill = e['header_fill']
+        c.alignment = e['center']
+        c.border = e['border']
 
-    # Obtener alumnos (ajusta la lógica de filtrado según tu modelo)
-    alumnos = Alumno.objects.filter(grupo=grupo).order_by('apellido_paterno')
+    for i, w in enumerate([15, 40, 12, 12, 12, 12], 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
 
-    for alumno in alumnos:
-        # Buscar la calificación si existe
+    # Filas de alumnos
+    alumnos = Alumno.objects.filter(grupo=grupo).order_by('nombre_completo')
+    for idx, alumno in enumerate(alumnos, 3):
         cal = Calificacion.objects.filter(
-            alumno=alumno, 
-            asignatura=asignatura, 
+            alumno=alumno,
+            asignatura=asignatura,
             parcial=parcial
         ).first()
-
-        ws.append([
+        fill_r = e['aprobado_fill'] if (cal and cal.aprobado) else (e['reprobado_fill'] if cal else e['warn_fill'])
+        for col, val in enumerate([
             alumno.numero_cuenta,
             alumno.nombre_completo,
-            cal.heteroevaluacion if cal else 0,
-            cal.coevaluacion if cal else 0,
-            cal.autoevaluacion if cal else 0,
-            cal.promedio if cal else 0,
-        ])
+            float(cal.heteroevaluacion) if cal else 'N/A',
+            float(cal.coevaluacion) if cal else 'N/A',
+            float(cal.autoevaluacion) if cal else 'N/A',
+            cal.promedio if cal else 'N/A',
+        ], 1):
+            c = ws.cell(row=idx, column=col, value=val)
+            c.fill = fill_r
+            c.border = e['border']
+            c.alignment = e['center'] if col != 2 else Alignment(vertical='center')
 
-    # Preparar la respuesta HTTP
     nombre_archivo = f"Calificaciones_{grupo.nombre}_{asignatura.clave}_P{parcial}.xlsx"
     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     response['Content-Disposition'] = f'attachment; filename="{nombre_archivo}"'
-    
     wb.save(response)
     return response
 
