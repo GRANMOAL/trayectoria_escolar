@@ -768,50 +768,6 @@ def captura_rapida(request):
         'alumno_ids_json': alumno_ids_json, 'minimo': MINIMO,
     })
 
-def exportar_calificaciones_excel(request):
-    grupo_id = request.GET.get('grupo')
-    asig_id = request.GET.get('asignatura')
-    parcial = request.GET.get('parcial')
-
-    grupo = Grupo.objects.get(id=grupo_id)
-    asignatura = Asignatura.objects.get(id=asig_id)
-    
-    # Crear el libro de Excel
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = f"Parcial {parcial}"
-
-    # Encabezados
-    columns = ['No. Cuenta', 'Nombre Completo', 'Hetero', 'Co-eval', 'Auto-eval', 'Promedio']
-    ws.append(columns)
-
-    # Obtener alumnos (ajusta la lógica de filtrado según tu modelo)
-    alumnos = Alumno.objects.filter(grupo=grupo).order_by('apellido_paterno')
-
-    for alumno in alumnos:
-        # Buscar la calificación si existe
-        cal = Calificacion.objects.filter(
-            alumno=alumno, 
-            asignatura=asignatura, 
-            parcial=parcial
-        ).first()
-
-        ws.append([
-            alumno.numero_cuenta,
-            alumno.nombre_completo,
-            cal.heteroevaluacion if cal else 0,
-            cal.coevaluacion if cal else 0,
-            cal.autoevaluacion if cal else 0,
-            cal.promedio if cal else 0,
-        ])
-
-    # Preparar la respuesta HTTP
-    nombre_archivo = f"Calificaciones_{grupo.nombre}_{asignatura.clave}_P{parcial}.xlsx"
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = f'attachment; filename="{nombre_archivo}"'
-    
-    wb.save(response)
-    return response
 
 def guardar_calificaciones(request):
     if request.method != 'POST':
