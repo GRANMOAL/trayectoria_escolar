@@ -315,13 +315,34 @@ def calificaciones_grupo(request):
         asignaturas = Asignatura.objects.filter(semestre=grupo_sel.semestre)
 
         for alumno in alumnos:
-            row = {'alumno': alumno, 'calificaciones': {}}
+            row = {
+                'alumno': alumno,
+                'calificaciones': {},
+                'promedio_general': 0
+            }
+
+            suma = 0
+            contador = 0
+
             for asig in asignaturas:
                 try:
-                    cal = Calificacion.objects.get(alumno=alumno, asignatura=asig, parcial=int(parcial))
+                    cal = Calificacion.objects.get(
+                        alumno=alumno,
+                        asignatura=asig,
+                        parcial=int(parcial)
+                    )
+
                     row['calificaciones'][asig.clave] = cal
+
+                    suma += cal.promedio
+                    contador += 1
+
                 except Calificacion.DoesNotExist:
                     row['calificaciones'][asig.clave] = None
+
+            if contador > 0:
+                row['promedio_general'] = round(suma / contador, 2)
+
             datos.append(row)
 
         # Una sola gráfica: barras de promedios por asignatura para este parcial

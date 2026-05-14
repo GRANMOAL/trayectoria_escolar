@@ -58,6 +58,7 @@ function filtrar() {
           {% for asig in asignaturas %}
           <th style="white-space:nowrap">{{ asig.nombre|truncatechars:18 }}</th>
           {% endfor %}
+          <th>Promedio General</th>
         </tr>
       </thead>
       <tbody>
@@ -94,6 +95,12 @@ function filtrar() {
             {% endwith %}
             {% endwith %}
           {% endfor %}
+          <td style="text-align:center; font-weight:700; {% if row.promedio_general >= 8 %}color:var(--success);{% elif row.promedio_general >= 6 %}color:var(--warning);{% else %}color:var(--danger);{% endif %}">
+            {% if row.promedio_general %}
+              {{ row.promedio_general }}
+            {% else %}
+              <span style="color:var(--text-muted); font-size:12px;">—</span>
+            {% endif %}
         </tr>
         {% empty %}
         <tr><td colspan="20" style="text-align:center; padding:24px; color:var(--text-muted);">Sin datos</td></tr>
