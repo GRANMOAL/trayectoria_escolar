@@ -11,6 +11,7 @@ import matplotlib.patches as mpatches
 import numpy as np
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from matplotlib.colors import LinearSegmentedColormap
 from openpyxl.utils import get_column_letter
 
 from .models import Semestre, Grupo, Alumno, Asignatura, Calificacion
@@ -206,7 +207,6 @@ def grafica_riesgo_asignaturas(riesgo_dict, titulo='Alumnos en riesgo por asigna
     plt.tight_layout()
     return fig2b64(fig)
 
-
 def grafica_calor_asignaturas_parciales(asignaturas_resumen):
     """Heatmap-style chart: asignaturas × parciales."""
     data = []
@@ -221,7 +221,30 @@ def grafica_calor_asignaturas_parciales(asignaturas_resumen):
     mat = np.array([[v if v is not None else np.nan for v in row] for row in data])
     fig, ax = plt.subplots(figsize=(6, max(2.5, len(ylabels) * 0.6)), facecolor=C_BG)
     base_ax(ax)
-    cmap = plt.cm.RdYlGn
+    colors = [
+    (0.0, "#b91c1c"),
+    (0.55, "#fa5e0a"),
+    (0.6, "#f99a16fb"),   # la mitada del valor (medio transparente, puede que la barra no se vea de acuerdo al tono)
+    (0.69, "#e2fb24"),   
+    (0.7, "#b5f916"),    
+    (1.0, "#15803d")
+    ]
+
+    cmap = LinearSegmentedColormap.from_list(
+    "custom_heat",
+    colors
+    )
+
+    cmap.set_bad(color='#f1f5f9')
+
+    im = ax.imshow(
+    mat,
+    cmap=cmap,
+    aspect='auto',
+    vmin=0,
+    vmax=10,
+    interpolation='nearest'
+    )
     cmap.set_bad(color='#f1f5f9')
     im = ax.imshow(mat, cmap=cmap, aspect='auto', vmin=0, vmax=10,
                    interpolation='nearest')
@@ -243,7 +266,6 @@ def grafica_calor_asignaturas_parciales(asignaturas_resumen):
     ax.spines[:].set_visible(False)
     plt.tight_layout()
     return fig2b64(fig)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Vistas
