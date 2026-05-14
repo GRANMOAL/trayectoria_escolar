@@ -23,5 +23,7 @@ urlpatterns = [
     path('seguimiento/notas/', views.seguimiento_notas_api, name='seguimiento_notas_api'),
     path('seguimiento/agregar-nota/', views.agregar_nota_api, name='agregar_nota_api'),
     path('seguimiento/exportar-calificaciones/', views.exportar_calificaciones_excel, name='exportar_calificaciones_excel'),
+    path('seguimiento/exportar-resumen-asignaturas/', views.exportar_resumen_asignaturas, name='exportar_resumen_asignaturas'),
+
 
 ]

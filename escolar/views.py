@@ -474,7 +474,182 @@ def indicadores(request):
     }
     return render(request, 'escolar/indicadores.html', context)
 
+def exportar_resumen_asignaturas(request):
+    grupo_id = request.GET.get('grupo')
+    parcial = request.GET.get('parcial')
 
+    if not grupo_id:
+        return redirect('dashboard')
+
+    grupo = get_object_or_404(Grupo, id=grupo_id)
+    asignaturas = Asignatura.objects.filter(semestre=grupo.semestre)
+
+    e = estilo_excel()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Resumen Asignaturas'
+
+    # ───────────────── HEADER ─────────────────
+
+    ws.merge_cells('A1:J1')
+
+    titulo = f'RESUMEN POR ASIGNATURA — {grupo.semestre.nombre} — Grupo {grupo.nombre}'
+
+    if parcial:
+        titulo += f' — Parcial {parcial}'
+
+    ws['A1'] = titulo
+
+    ws['A1'].font = Font(
+        bold=True,
+        color='FFFFFF',
+        size=12
+    )
+
+    ws['A1'].fill = e['title_fill']
+    ws['A1'].alignment = e['center']
+
+    headers = [
+        'Asignatura',
+        'Clave',
+        'Promedio',
+        'Aprobados',
+        'Reprobados',
+        '% Aprobación',
+        'P1',
+        'P2',
+        'P3',
+        'Final'
+    ]
+
+    for col, h in enumerate(headers, 1):
+        c = ws.cell(row=2, column=col, value=h)
+
+        c.font = e['header_font']
+        c.fill = e['header_fill']
+        c.alignment = e['center']
+        c.border = e['border']
+
+    widths = [35, 15, 12, 12, 12, 15, 10, 10, 10, 10]
+
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    # ───────────────── DATOS ─────────────────
+
+    row_n = 3
+
+    for asig in asignaturas:
+
+        califs = Calificacion.objects.filter(
+            asignatura=asig,
+            alumno__grupo=grupo
+        )
+
+        if parcial:
+            califs = califs.filter(parcial=int(parcial))
+
+        total = califs.count()
+
+        promedio = round(
+            sum(c.promedio for c in califs) / total,
+            2
+        ) if total else 0
+
+        aprobados = len([
+        c for c in califs
+        if c.promedio >= MINIMO
+        ])
+
+        reprobados = total - aprobados
+
+        pct = round(
+            (aprobados / total) * 100,
+            2
+        ) if total else 0
+
+        por_parcial = {}
+
+        for p in [1, 2, 3]:
+
+            cp = Calificacion.objects.filter(
+                asignatura=asig,
+                alumno__grupo=grupo,
+                parcial=p
+            )
+
+            if cp.exists():
+                por_parcial[p] = round(
+                    sum(c.promedio for c in cp) / cp.count(),
+                    2
+                )
+            else:
+                por_parcial[p] = '—'
+
+        vals_final = [
+            v for v in por_parcial.values()
+            if isinstance(v, (int, float))
+        ]
+
+        promedio_final = round(
+            sum(vals_final) / len(vals_final),
+            2
+        ) if vals_final else '—'
+
+        fill_r = (
+            e['aprobado_fill']
+            if promedio >= MINIMO
+            else e['reprobado_fill']
+        )
+
+        row_data = [
+            asig.nombre,
+            asig.clave,
+            promedio,
+            aprobados,
+            reprobados,
+            pct,
+            por_parcial[1],
+            por_parcial[2],
+            por_parcial[3],
+            promedio_final
+        ]
+
+        for col, val in enumerate(row_data, 1):
+
+            c = ws.cell(
+                row=row_n,
+                column=col,
+                value=val
+            )
+
+            c.fill = fill_r
+            c.border = e['border']
+
+            c.alignment = (
+                e['center']
+                if col != 1
+                else Alignment(vertical='center')
+            )
+
+        row_n += 1
+
+    # ───────────────── RESPONSE ─────────────────
+
+    resp = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
+    resp['Content-Disposition'] = (
+        f'attachment; filename="resumen_asignaturas_G{grupo.nombre}.xlsx"'
+    )
+
+    wb.save(resp)
+
+    return resp
+
+#---------------
 def pronostico_ia(request):
     grupo_id = request.GET.get('grupo')
     grupos = Grupo.objects.select_related('semestre').all()

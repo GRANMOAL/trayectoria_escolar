@@ -119,7 +119,7 @@ document.getElementById('grupo-sel').addEventListener('change', function() {
 </div>
 {% endif %}
 
-<!-- Tabla resumen asignaturas -->
+
 <!-- Tabla resumen asignaturas -->
 {% if asignaturas_resumen %}
 <div class="card">
@@ -129,6 +129,10 @@ document.getElementById('grupo-sel').addEventListener('change', function() {
   </div>
 
   <div class="table-wrap">
+    <a href="{% url 'exportar_resumen_asignaturas' %}?grupo={{ grupo_sel.id }}{% if parcial_filtro %}&parcial={{ parcial_filtro }}{% endif %}"
+      class="btn btn-success">
+      ↓ Exportar Resumen Excel
+    </a>
     <table>
       <thead>
         <tr>
