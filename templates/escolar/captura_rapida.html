@@ -170,10 +170,42 @@ document.getElementById('grupo-sel').addEventListener('change', function() {
   </div>
 </div>
 
-<script>
-const alumnoIds = {{ alumno_ids_json }};
+  <dialog class="capture-modal" id="capture-modal" aria-labelledby="capture-modal-title" aria-describedby="capture-modal-message">
+    <div class="capture-modal-icon" aria-hidden="true">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 2.5 17.4A2 2 0 0 0 4.2 20h15.6a2 2 0 0 0 1.7-2.6L13.7 3.9a2 2 0 0 0-3.4 0Z"/>
+      </svg>
+    </div>
+    <h2 id="capture-modal-title">Calificación fuera de rango</h2>
+    <p id="capture-modal-message">No puedes agregar valores negativos o superiores a 10.</p>
+    <button type="button" class="btn btn-primary capture-modal-close" id="capture-modal-close" autofocus>Entendido</button>
+  </dialog>
 
-function calcPromedio(aid) {
+  <script>
+  const alumnoIds = {{ alumno_ids_json }};
+  const mensajeRangoInvalido = 'No puedes agregar valores negativos o superiores a 10.';
+  let campoConError = null;
+
+  function mostrarAlertaCaptura(mensaje, campo = null) {
+    const modal = document.getElementById('capture-modal');
+    document.getElementById('capture-modal-message').textContent = mensaje;
+    campoConError = campo;
+    if (!modal.open) modal.showModal();
+  }
+
+  document.getElementById('capture-modal-close').addEventListener('click', () => {
+    document.getElementById('capture-modal').close();
+  });
+
+  document.getElementById('capture-modal').addEventListener('close', () => {
+    if (campoConError) {
+      campoConError.focus();
+      campoConError.select();
+      campoConError = null;
+    }
+  });
+
+  function calcPromedio(aid) {
   const h = parseFloat(document.getElementById('h'+aid)?.value);
   const c = parseFloat(document.getElementById('c'+aid)?.value);
   const a = parseFloat(document.getElementById('a'+aid)?.value);
@@ -223,7 +255,6 @@ function limpiarTodo() {
 async function guardarTodo() {
   const btns = [document.getElementById('btn-guardar'), document.getElementById('btn-guardar2')];
   const msg = document.getElementById('status-msg');
-  btns.forEach(b => { b.disabled = true; b.textContent = 'Guardando…'; });
 
   const csrfEl = document.querySelector('[name=csrfmiddlewaretoken]');
   const csrf = csrfEl ? csrfEl.value : '';
@@ -231,27 +262,48 @@ async function guardarTodo() {
   const parcialEl = document.querySelector('[name=parcial]');
 
   const rows = [];
+  let inputInvalido = null;
   alumnoIds.forEach(aid => {
     const h = document.getElementById('h'+aid)?.value;
     const c = document.getElementById('c'+aid)?.value;
     const a = document.getElementById('a'+aid)?.value;
+    for (const [campo, valor] of [['h', h], ['c', c], ['a', a]]) {
+      const input = document.getElementById(campo + aid);
+      if (valor !== '' && valor !== undefined && (Number(valor) < 0 || Number(valor) > 10)) {
+        inputInvalido = input;
+      }
+    }
     if (h !== '' && h !== undefined && c !== '' && a !== '') {
       rows.push({ alumno_id: aid, hetero: h, co: c, auto: a });
     }
   });
 
+  if (inputInvalido) {
+    mostrarAlertaCaptura(mensajeRangoInvalido, inputInvalido);
+    return;
+  }
+
   if (rows.length === 0) {
-    btns.forEach(b => { b.disabled = false; b.textContent = 'Guardar todo'; });
     msg.textContent = 'Sin datos para guardar.';
     return;
   }
 
-  const resp = await fetch('{% url "guardar_calificaciones" %}', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
-    body: JSON.stringify({ asignatura_id: asigEl.value, parcial: parcialEl.value, rows })
-  });
-  const data = await resp.json();
+  btns.forEach(b => { b.disabled = true; b.textContent = 'Guardando…'; });
+
+  let data;
+  try {
+    const resp = await fetch('{% url "guardar_calificaciones" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+      body: JSON.stringify({ asignatura_id: asigEl.value, parcial: parcialEl.value, rows })
+    });
+    data = await resp.json();
+  } catch (error) {
+    btns.forEach(b => { b.disabled = false; b.textContent = 'Error'; });
+    msg.textContent = 'No se pudo conectar con el servidor. Intenta de nuevo.';
+    msg.style.color = 'var(--danger)';
+    return;
+  }
   btns.forEach(b => { b.disabled = false; });
   if (data.ok) {
     btns.forEach(b => b.textContent = 'Guardado');
@@ -262,6 +314,7 @@ async function guardarTodo() {
     btns.forEach(b => b.textContent = 'Error');
     msg.textContent = data.error || 'Error al guardar';
     msg.style.color = 'var(--danger)';
+    mostrarAlertaCaptura(data.error || 'Ocurrió un error al guardar las calificaciones.');
   }
 }
 
@@ -275,6 +328,11 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.score-input').forEach(inp => {
     inp.addEventListener('focus', () => { inp.style.borderColor = 'var(--primary)'; inp.style.boxShadow = '0 0 0 3px rgba(79,70,229,.12)'; inp.style.background = '#eef2ff'; });
     inp.addEventListener('blur',  () => { inp.style.borderColor = ''; inp.style.boxShadow = ''; inp.style.background = 'white'; });
+    inp.addEventListener('change', () => {
+      if (inp.value !== '' && (Number(inp.value) < 0 || Number(inp.value) > 10)) {
+        mostrarAlertaCaptura(mensajeRangoInvalido, inp);
+      }
+    });
   });
 });
 </script>

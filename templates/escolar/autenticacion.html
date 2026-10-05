@@ -1,0 +1,63 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% if es_registro %}Crear cuenta{% else %}Iniciar sesión{% endif %} · Trayectoria Escolar</title>
+  <link rel="stylesheet" href="{% static 'css/estilos.css' %}?v=20261005-auth">
+</head>
+<body class="auth-page">
+  <main class="auth-card">
+    <div class="auth-brand">
+      <div class="auth-brand-content">
+        <div class="auth-mark" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
+            <path d="M6 12v5c3 3 9 3 12 0v-5"/>
+          </svg>
+        </div>
+        <p class="auth-eyebrow">Preparatoria · ITHI</p>
+        <h1>Trayectoria Escolar</h1>
+        <p class="auth-intro">
+          {% if es_registro %}
+            Crea una cuenta institucional para acceder al sistema.
+          {% else %}
+            Inicia sesión con tu usuario institucional para continuar.
+          {% endif %}
+        </p>
+      </div>
+    </div>
+
+    <form method="post" class="auth-form">
+      {% csrf_token %}
+      {% if siguiente %}<input type="hidden" name="next" value="{{ siguiente }}">{% endif %}
+
+      {% if form.non_field_errors %}
+        <div class="auth-errors" role="alert">{{ form.non_field_errors }}</div>
+      {% endif %}
+
+      {% for field in form %}
+        <div class="auth-field">
+          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {% if field.help_text %}<small class="auth-help">{{ field.help_text }}</small>{% endif %}
+          {% if field.errors %}<div class="auth-errors" role="alert">{{ field.errors }}</div>{% endif %}
+        </div>
+      {% endfor %}
+
+      <button type="submit" class="btn btn-primary auth-submit">
+        {% if es_registro %}Crear cuenta{% else %}Iniciar sesión{% endif %}
+      </button>
+    </form>
+
+    <p class="auth-switch">
+      {% if es_registro %}
+        ¿Ya tienes cuenta? <a href="{% url 'login' %}">Inicia sesión</a>
+      {% else %}
+        ¿Aún no tienes cuenta? <a href="{% url 'registro' %}">Crear cuenta institucional</a>
+      {% endif %}
+    </p>
+  </main>
+</body>
+</html>

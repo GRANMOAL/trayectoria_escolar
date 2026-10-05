@@ -52,7 +52,13 @@ python manage.py createsuperuser
 python manage.py runserver
 ```
 
-Visita: http://127.0.0.1:8000
+Visita: http://127.0.0.1:8000/login/
+
+Desde la pantalla de inicio de sesión también puedes crear una cuenta con tu
+usuario institucional y contraseña. Las cuentas se guardan en el modelo de
+usuarios de Django y requieren autenticación para acceder a las páginas, APIs,
+descargas y al panel de administración. Las contraseñas se almacenan mediante
+PBKDF2-SHA256 con una sal aleatoria por cuenta; nunca se guardan en texto plano.
 
 ## Estructura del Proyecto
 ```
@@ -111,8 +117,7 @@ trayectoria_escolar/
 
 ## Panel de Administración
 URL: http://127.0.0.1:8000/admin/
-- Usuario: `admin`
-- Contraseña: `admin123` (cambiar en producción)
+- Requiere iniciar sesión; solo las cuentas con permisos de administración pueden acceder.
 
 ## Modelo de Datos
 

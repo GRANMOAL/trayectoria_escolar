@@ -1,6 +1,7 @@
 import json as _json
 import io
 import base64
+import math
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, JsonResponse
 from django.contrib import messages
@@ -10,10 +11,15 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 import openpyxl
+from django.contrib.auth import login, logout
+from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from matplotlib.colors import LinearSegmentedColormap
 from openpyxl.utils import get_column_letter
 
+from .forms import InicioSesionForm, RegistroForm
 from .models import Semestre, Grupo, Alumno, Asignatura, Calificacion
 
 # ── Constante global ──────────────────────────────────────────────────────────
@@ -30,6 +36,51 @@ C_TEXT     = '#1e293b'
 C_TICK     = '#475569'
 C_BORDER   = '#e2e8f0'
 C_BG       = '#f8fafc'
+
+
+def inicio_sesion(request):
+    if request.user.is_authenticated:
+        return redirect('dashboard')
+
+    siguiente = request.POST.get('next', request.GET.get('next', ''))
+    form = InicioSesionForm(request, data=request.POST or None)
+    if request.method == 'POST' and form.is_valid():
+        login(request, form.get_user())
+        if url_has_allowed_host_and_scheme(
+            siguiente,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            return redirect(siguiente)
+        return redirect('dashboard')
+
+    return render(request, 'escolar/autenticacion.html', {
+        'form': form,
+        'es_registro': False,
+        'siguiente': siguiente,
+    })
+
+
+def registro(request):
+    if request.user.is_authenticated:
+        return redirect('dashboard')
+
+    form = RegistroForm(request.POST or None)
+    if request.method == 'POST' and form.is_valid():
+        usuario = form.save()
+        login(request, usuario)
+        return redirect('dashboard')
+
+    return render(request, 'escolar/autenticacion.html', {
+        'form': form,
+        'es_registro': True,
+    })
+
+
+@require_POST
+def cerrar_sesion(request):
+    logout(request)
+    return redirect('login')
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1039,8 +1090,11 @@ def guardar_calificaciones(request):
         for row in data.get('rows', []):
             alumno = get_object_or_404(Alumno, id=row['alumno_id'])
             h, c, a = float(row['hetero']), float(row['co']), float(row['auto'])
-            if not (0 <= h <= 10 and 0 <= c <= 10 and 0 <= a <= 10):
-                continue
+            if not all(math.isfinite(valor) and 0 <= valor <= 10 for valor in (h, c, a)):
+                return JsonResponse({
+                    'ok': False,
+                    'error': 'No se pueden agregar valores negativos o superiores a 10.',
+                }, status=400)
             _, created = Calificacion.objects.update_or_create(
                 alumno=alumno, asignatura=asig, parcial=parcial,
                 defaults={'heteroevaluacion': h, 'coevaluacion': c, 'autoevaluacion': a}

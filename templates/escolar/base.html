@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Trayectoria Escolar{% endblock %}</title>
   {% load static %}
-  <link rel="stylesheet" href="{% static 'css/estilos.css' %}">
+  <link rel="stylesheet" href="{% static 'css/estilos.css' %}?v=20261005-capture-modal">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Fraunces:wght@700;900&display=swap" rel="stylesheet">
 
@@ -189,6 +189,11 @@
 
   <!-- Footer -->
   <div class="sidebar-footer">
+    <div class="auth-user">Sesión: <strong>{{ request.user.get_username }}</strong></div>
+    <form method="post" action="{% url 'logout' %}">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-secondary auth-logout">Cerrar sesión</button>
+    </form>
     <a href="{% url 'exportar_excel' %}{% if request.GET.grupo %}?grupo={{ request.GET.grupo }}{% endif %}"
        class="btn btn-success" style="width:100%; justify-content:center; font-size:13px; gap:8px;">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
