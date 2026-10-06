@@ -9,6 +9,14 @@ class InicioSesionForm(AuthenticationForm):
         widget=forms.TextInput(attrs={'autofocus': True, 'autocomplete': 'username'}),
     )
 
+    def clean_username(self):
+        username = self.cleaned_data['username']
+        if "'" in username or '"' in username:
+            raise forms.ValidationError(
+                'El usuario institucional no puede contener comillas simples ni dobles.'
+            )
+        return username
+
 
 class RegistroForm(UserCreationForm):
     username = forms.CharField(

@@ -92,3 +92,14 @@ class Nota(models.Model):
 
     class Meta:
         ordering = ['-fecha']
+
+
+class IntentoInicioSesion(models.Model):
+    clave = models.CharField(max_length=64, unique=True)
+    fallos = models.PositiveIntegerField(default=0)
+    bloqueado_hasta = models.DateTimeField(null=True, blank=True)
+    actualizado = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'intento de inicio de sesión'
+        verbose_name_plural = 'intentos de inicio de sesión'

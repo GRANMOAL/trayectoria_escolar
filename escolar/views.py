@@ -2,6 +2,9 @@ import json as _json
 import io
 import base64
 import math
+import hashlib
+import ipaddress
+from datetime import timedelta
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, JsonResponse
 from django.contrib import messages
@@ -13,14 +16,16 @@ import numpy as np
 import openpyxl
 from django.contrib.auth import login, logout
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
+from django.db import transaction
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from matplotlib.colors import LinearSegmentedColormap
 from openpyxl.utils import get_column_letter
 
 from .forms import InicioSesionForm, RegistroForm
-from .models import Semestre, Grupo, Alumno, Asignatura, Calificacion
+from .models import Semestre, Grupo, Alumno, Asignatura, Calificacion, IntentoInicioSesion
 
 # ── Constante global ──────────────────────────────────────────────────────────
 MINIMO = 7.0   # calificación mínima aprobatoria
@@ -38,21 +43,99 @@ C_BORDER   = '#e2e8f0'
 C_BG       = '#f8fafc'
 
 
+INTENTOS_ANTES_DE_BLOQUEO = 5
+DURACION_BLOQUEO_INICIAL = 30
+DURACION_BLOQUEO_MAXIMA = 15 * 60
+
+
+def _clave_intento_inicio_sesion(request, username):
+    ip = request.META.get('REMOTE_ADDR', '')
+    try:
+        ip = str(ipaddress.ip_address(ip))
+    except ValueError:
+        ip = ''
+    dato = f'{username.strip().casefold()}\0{ip}'
+    return hashlib.sha256(dato.encode('utf-8')).hexdigest()
+
+
+def _tiempo_bloqueo_restante(intento, ahora=None):
+    ahora = ahora or timezone.now()
+    if intento and intento.bloqueado_hasta and intento.bloqueado_hasta > ahora:
+        return int((intento.bloqueado_hasta - ahora).total_seconds()) + 1
+    return 0
+
+
+def _registrar_fallo_inicio_sesion(clave):
+    with transaction.atomic():
+        intento, _ = IntentoInicioSesion.objects.select_for_update().get_or_create(
+            clave=clave,
+        )
+        ahora = timezone.now()
+        intento.fallos += 1
+        intento.bloqueado_hasta = None
+        if intento.fallos >= INTENTOS_ANTES_DE_BLOQUEO:
+            exponente = min(intento.fallos - INTENTOS_ANTES_DE_BLOQUEO, 5)
+            segundos = min(
+                DURACION_BLOQUEO_INICIAL * (2 ** exponente),
+                DURACION_BLOQUEO_MAXIMA,
+            )
+            intento.bloqueado_hasta = ahora + timedelta(seconds=segundos)
+        intento.save(update_fields=['fallos', 'bloqueado_hasta', 'actualizado'])
+
+
+def _reiniciar_intentos_inicio_sesion(clave):
+    IntentoInicioSesion.objects.filter(clave=clave).delete()
+
+
 def inicio_sesion(request):
     if request.user.is_authenticated:
         return redirect('dashboard')
 
     siguiente = request.POST.get('next', request.GET.get('next', ''))
+    username = request.POST.get('username', '')
+    clave_intento = _clave_intento_inicio_sesion(request, username)
+    ahora = timezone.now()
+    intento = IntentoInicioSesion.objects.filter(clave=clave_intento).first()
+    espera = _tiempo_bloqueo_restante(intento, ahora)
+    if request.method == 'POST' and espera:
+        form = InicioSesionForm(request, data=request.POST)
+        form.add_error(
+            None,
+            f'Demasiados intentos. Intenta de nuevo en {espera} segundos.',
+        )
+        return render(request, 'escolar/autenticacion.html', {
+            'form': form,
+            'es_registro': False,
+            'siguiente': siguiente,
+            'cooldown_segundos': espera,
+        }, status=429)
+
     form = InicioSesionForm(request, data=request.POST or None)
-    if request.method == 'POST' and form.is_valid():
-        login(request, form.get_user())
-        if url_has_allowed_host_and_scheme(
-            siguiente,
-            allowed_hosts={request.get_host()},
-            require_https=request.is_secure(),
-        ):
-            return redirect(siguiente)
-        return redirect('dashboard')
+    if request.method == 'POST':
+        if form.is_valid():
+            _reiniciar_intentos_inicio_sesion(clave_intento)
+            login(request, form.get_user())
+            if url_has_allowed_host_and_scheme(
+                siguiente,
+                allowed_hosts={request.get_host()},
+                require_https=request.is_secure(),
+            ):
+                return redirect(siguiente)
+            return redirect('dashboard')
+        _registrar_fallo_inicio_sesion(clave_intento)
+        intento = IntentoInicioSesion.objects.get(clave=clave_intento)
+        espera = _tiempo_bloqueo_restante(intento)
+        if espera:
+            form.add_error(
+                None,
+                f'Demasiados intentos. Intenta de nuevo en {espera} segundos.',
+            )
+            return render(request, 'escolar/autenticacion.html', {
+                'form': form,
+                'es_registro': False,
+                'siguiente': siguiente,
+                'cooldown_segundos': espera,
+            }, status=429)
 
     return render(request, 'escolar/autenticacion.html', {
         'form': form,

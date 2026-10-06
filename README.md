@@ -59,6 +59,10 @@ usuario institucional y contraseña. Las cuentas se guardan en el modelo de
 usuarios de Django y requieren autenticación para acceder a las páginas, APIs,
 descargas y al panel de administración. Las contraseñas se almacenan mediante
 PBKDF2-SHA256 con una sal aleatoria por cuenta; nunca se guardan en texto plano.
+El inicio de sesión bloquea temporalmente tras cinco intentos fallidos; el
+tiempo de espera aumenta progresivamente hasta 15 minutos y se reinicia al
+iniciar sesión correctamente. El usuario institucional no acepta comillas
+simples ni dobles.
 
 ## Estructura del Proyecto
 ```

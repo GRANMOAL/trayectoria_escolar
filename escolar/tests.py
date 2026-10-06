@@ -1,10 +1,12 @@
 import json
+from datetime import timedelta
 
+from django.utils import timezone
 from django.test import TestCase
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
-from .models import Alumno, Asignatura, Grupo, Semestre, Calificacion
+from .models import Alumno, Asignatura, Grupo, Semestre, Calificacion, IntentoInicioSesion
 from .urls import urlpatterns
 
 
@@ -92,6 +94,65 @@ class AutenticacionTests(TestCase):
         )
 
         self.assertRedirects(response, reverse('dashboard'), fetch_redirect_response=False)
+
+    def test_login_rechaza_comillas_simples_y_dobles_en_usuario(self):
+        for username in ("docente'ithi", 'docente"ithi'):
+            with self.subTest(username=username):
+                response = self.client.post(reverse('login'), {
+                    'username': username,
+                    'password': 'ClaveIncorrecta',
+                })
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(
+                    response,
+                    'no puede contener comillas simples ni dobles',
+                )
+
+    def test_login_aplica_cooldown_incremental_tras_intentos_fallidos(self):
+        datos = {'username': 'docente.ithi', 'password': 'incorrecta'}
+
+        for _ in range(4):
+            response = self.client.post(reverse('login'), datos)
+            self.assertEqual(response.status_code, 200)
+
+        response = self.client.post(reverse('login'), datos)
+        self.assertEqual(response.status_code, 429)
+        intento = IntentoInicioSesion.objects.get()
+        self.assertEqual(intento.fallos, 5)
+        self.assertContains(response, 'Demasiados intentos', status_code=429)
+
+        response = self.client.post(reverse('login'), datos)
+        self.assertEqual(response.status_code, 429)
+        intento.refresh_from_db()
+        self.assertEqual(intento.fallos, 5)
+
+        intento.bloqueado_hasta = timezone.now() - timedelta(seconds=1)
+        intento.save(update_fields=['bloqueado_hasta'])
+        response = self.client.post(reverse('login'), datos)
+        self.assertEqual(response.status_code, 429)
+        intento.refresh_from_db()
+        self.assertEqual(intento.fallos, 6)
+        self.assertGreater(
+            (intento.bloqueado_hasta - timezone.now()).total_seconds(),
+            50,
+        )
+
+    def test_inicio_sesion_correcto_limpia_intentos_fallidos(self):
+        usuario = get_user_model().objects.create_user(
+            username='docente.ithi',
+            password='ClaveSegura-2026!',
+        )
+        self.client.post(reverse('login'), {
+            'username': usuario.username,
+            'password': 'incorrecta',
+        })
+        self.client.post(reverse('login'), {
+            'username': usuario.username,
+            'password': 'ClaveSegura-2026!',
+        })
+
+        self.assertFalse(IntentoInicioSesion.objects.exists())
 
 
 class CapturaRapidaCalificacionesTests(TestCase):
