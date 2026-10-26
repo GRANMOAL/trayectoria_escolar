@@ -23,6 +23,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'escolar.middleware.LoginRequiredMiddleware',
 ]
 
 ROOT_URLCONF = 'trayectoria_escolar.urls'
@@ -57,3 +58,16 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+LOGIN_URL = 'login'
+LOGIN_REDIRECT_URL = 'dashboard'
+LOGOUT_REDIRECT_URL = 'login'
+PRIVACY_NOTICE_VERSION = '2026-10-26'
+PRIVACY_NOTICE_DATE = '26 de octubre de 2026'
+REQUIRE_STUDENT_CONSENT = True
+ARCO_RESPONSE_DAYS = 20
+
+# ── Agente IA (Ollama) ────────────────────────────────────────────────────────
+import os
+OLLAMA_HOST = os.environ.get('OLLAMA_HOST', 'http://127.0.0.1:11434')
+OLLAMA_MODEL = os.environ.get('OLLAMA_MODEL', 'gemma3:4b ')
+OLLAMA_TIMEOUT = int(os.environ.get('OLLAMA_TIMEOUT', '300'))

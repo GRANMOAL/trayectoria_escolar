@@ -17,6 +17,9 @@
 4. **Indicadores** — Promedio de grupo, asignatura, alumno; índices de aprobación/reprobación con gráficas
 5. **Pronóstico IA** — Predicción de P3 usando regresión lineal, alumnos en riesgo
 6. **Exportar Excel** — Descarga con calificaciones completas y lista original formateada
+7. **Agente IA (Ollama)** — Chat con el modelo local `gemma:4b` que usa como contexto las calificaciones del grupo/alumno seleccionado
+8. **Privacidad y consentimiento** — Aviso público integral y simplificado con versión/fecha; registro auditable y revocable del consentimiento de madre, padre o tutor; bloqueo por alumno sin consentimiento vigente
+9. **Derechos ARCO** — Recepción pública de solicitudes, panel de coordinación, verificación de identidad, exportaciones JSON/Excel, rectificación, bloqueo y supresión con auditoría
 
 ## Instalación
 
@@ -47,7 +50,39 @@ python manage.py seed_data
 python manage.py createsuperuser
 ```
 
-### 6. Iniciar servidor
+### 6. Iniciar sesión
+El sistema solicita autenticación para acceder a sus módulos. Inicia sesión con el usuario creado
+con `createsuperuser`, o crea cuentas adicionales desde `/admin/`. El aviso público está disponible
+en `/aviso-de-privacidad/`; completa los datos institucionales señalados antes de usar datos reales.
+Después de iniciar sesión, cada usuario debe aceptar la versión vigente del aviso para entrar; si la
+rechaza, la sesión se cierra. Las aceptaciones quedan registradas por usuario, versión y fecha/hora, y
+se pueden consultar desde el panel de administración.
+
+El personal autorizado registra los consentimientos de alumnos en `/consentimientos/`. El registro
+guarda el alumno, la persona tutora y su parentesco, la versión del aviso, la fecha/hora, el medio y
+el estado; también permite revocarlo. Por defecto (`REQUIRE_STUDENT_CONSENT = True`), los módulos,
+reportes, exportaciones y APIs solo incluyen alumnos con consentimiento vigente para la versión actual.
+El panel de consentimientos permite dar de alta el registro necesario para habilitar esos datos.
+Para desactivar el bloqueo en una instalación, cambia esa opción a `False` en `settings.py`.
+La importación puede registrar alumnos nuevos para iniciar la recolección, pero no guarda sus
+calificaciones hasta que tengan consentimiento vigente; después se puede repetir la importación.
+
+### Solicitudes ARCO
+
+Las personas titulares o sus representantes pueden presentar una solicitud en `/derechos-arco/`.
+El formulario no revela si existe el número de cuenta indicado. El personal marcado como `is_staff`
+tramita los folios desde `/coordinacion/arco/`; antes de exportar o modificar datos debe verificar
+la identidad y vincular al titular. El plazo se calcula con `ARCO_RESPONSE_DAYS` (20 días naturales
+por defecto); la institución debe configurar y validar el plazo legal aplicable.
+
+Las exportaciones de acceso entregan JSON o Excel con los datos del titular, calificaciones,
+seguimiento y consentimientos. Las rectificaciones permitidas se limitan a nombre, número de cuenta
+y correo. El bloqueo impide el uso de datos en la plataforma. La supresión requiere escribir
+`SUPRIMIR`: elimina calificaciones y notas, anonimiza los identificadores del alumno, desvincula y
+anonimiza solicitudes y consentimientos relacionados, y conserva el folio y la bitácora sin datos
+identificables. Los eventos de trámite son de solo lectura en administración.
+
+### 7. Iniciar servidor
 ```bash
 python manage.py runserver
 ```
@@ -75,32 +110,6 @@ trayectoria_escolar/
 └── manage.py
 ```
 
-## Imagenes del Proyecto
-1. Dashboard
-<img width="2556" height="1171" alt="image" src="https://github.com/user-attachments/assets/3468a80b-4325-44ee-8d32-f7c60010e212" />
-
-2. Lista de Alumnos
-<img width="2559" height="1172" alt="image" src="https://github.com/user-attachments/assets/dca33dc9-fd9a-4ea6-b457-6cc3d040545d" />
-
-4. Calificaciones
-<img width="2559" height="1169" alt="image" src="https://github.com/user-attachments/assets/4fb187a4-af10-466b-9aee-a40a181e0706" />
-
-6. Indicadores
-<img width="2557" height="1165" alt="image" src="https://github.com/user-attachments/assets/ec18dea6-89ae-4b08-84b4-9ef1858d2deb" />
-
-8. Pronostico IA
-<img width="2556" height="1155" alt="image" src="https://github.com/user-attachments/assets/70c7e6a0-f76b-4252-a109-3f254690a05e" />
-
-10. Captura rapida
-<img width="2557" height="1169" alt="image" src="https://github.com/user-attachments/assets/32757236-803e-42e1-a92f-0866f40e60ae" />
-
-12. Seguimiento
-<img width="2558" height="1159" alt="image" src="https://github.com/user-attachments/assets/13dbf300-368f-4b30-8d98-4cad7cff9041" />
-
-14. Panel Tutor
-<img width="2540" height="1144" alt="image" src="https://github.com/user-attachments/assets/7c480bf0-c51b-440b-96a3-99b7b24b52db" />
-
-
 ## Flujo de Trabajo
 
 1. **Admin** → Crear Semestre, Grupos, Asignaturas y Alumnos
@@ -111,10 +120,14 @@ trayectoria_escolar/
 
 ## Panel de Administración
 URL: http://127.0.0.1:8000/admin/
-- Usuario: `admin`
-- Contraseña: `admin123` (cambiar en producción)
+Accede con una cuenta de superusuario creada mediante `python manage.py createsuperuser`.
 
 ## Modelo de Datos
+
+### Consentimiento
+- Titular: alumno; madre, padre o tutor legal que otorga el consentimiento
+- Versión del aviso, fecha/hora de registro, medio de obtención y estado vigente/revocado
+- Una nueva aceptación revoca el registro vigente anterior; la revocación conserva la evidencia histórica
 
 ### Calificación
 - **Heteroevaluación**: evaluación del docente (0–10)
@@ -131,3 +144,25 @@ Utiliza **regresión lineal** (NumPy `polyfit`) sobre los promedios de los parci
 - 📈 **Mejora**: pendiente > 0.2
 - ➡️ **Estable**: pendiente entre -0.2 y 0.2
 - 📉 **Riesgo alto**: pendiente < -0.2
+
+
+## Agente IA con Ollama (gemma:4b)
+Ruta: `/agente/` (menú lateral → Análisis → *Agente IA*).
+
+1. Instalar [Ollama](https://ollama.com) y descargar el modelo:
+```bash
+ollama pull gemma:4b
+ollama serve        # si no corre ya como servicio
+```
+2. Iniciar el proyecto normalmente (`python manage.py runserver`). No requiere dependencias nuevas.
+
+Configuración opcional por variables de entorno (ver `settings.py`):
+| Variable | Valor por defecto |
+|---|---|
+| `OLLAMA_MODEL` | `gemma:4b` |
+| `OLLAMA_HOST` | `http://127.0.0.1:11434` |
+| `OLLAMA_TIMEOUT` | `300` (segundos) |
+
+Si el nombre de tu modelo en Ollama es distinto (p. ej. `gemma3:4b`), ejecuta `ollama list` y define `OLLAMA_MODEL` con ese nombre.
+
+Archivos: `escolar/ollama_client.py` (cliente HTTP con streaming), `escolar/agente.py` (prompt + contexto desde la BD), vistas `agente_*` en `views.py` y `templates/escolar/agente.html`.

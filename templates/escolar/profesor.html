@@ -288,10 +288,7 @@
             <td>{% for g in sem.grupos.all %}<span class="badge badge-primary" style="margin:2px;">{{ g.nombre }}</span>{% empty %}<span style="color:var(--text-muted);">—</span>{% endfor %}</td>
             <td>{% for a in sem.asignaturas.all %}<span class="chip" style="margin:2px;">{{ a.clave }}</span>{% empty %}<span style="color:var(--text-muted);">—</span>{% endfor %}</td>
             <td>
-              {% with total=0 %}
-              {% for g in sem.grupos.all %}{{ g.alumnos.count }}{% endfor %}
-              {% endwith %}
-              <span class="badge badge-cyan">{% for g in sem.grupos.all %}{% if forloop.first %}{{ g.alumnos.count }}{% endif %}{% endfor %}</span>
+              <span class="badge badge-cyan">{{ sem.alumnos_con_consentimiento }}</span>
             </td>
           </tr>
           {% empty %}

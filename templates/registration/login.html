@@ -1,0 +1,53 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Iniciar sesión · Trayectoria Escolar</title>
+  <link rel="stylesheet" href="{% static 'css/estilos.css' %}">
+</head>
+<body class="auth-page">
+  <main class="auth-card">
+    <header class="auth-brand">
+      <div class="auth-brand-icon" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>
+        </svg>
+      </div>
+      <h1>Trayectoria Escolar</h1>
+      <p>Ingresa con la cuenta que te proporcionó la institución.</p>
+    </header>
+
+    {% if form.errors %}
+    <div class="auth-error" role="alert">El usuario o la contraseña no son correctos. Inténtalo de nuevo.</div>
+    {% endif %}
+    {% if next and user.is_authenticated %}
+    <div class="auth-error" role="alert">Tu cuenta no tiene permiso para acceder a esa página.</div>
+    {% endif %}
+
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ next }}">
+      <div class="form-group">
+        <label for="id_username">Usuario</label>
+        <input type="text" name="username" id="id_username" autocomplete="username" autofocus required>
+      </div>
+      <div class="form-group">
+        <label for="id_password">Contraseña</label>
+        <input type="password" name="password" id="id_password" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn btn-primary">Iniciar sesión</button>
+    </form>
+
+    <nav class="auth-links" aria-label="Información">
+      <a href="{% url 'aviso_privacidad' %}">Consulta el aviso de privacidad</a>
+    </nav>
+  </main>
+  <footer class="auth-footer">
+    <a href="{% url 'aviso_privacidad' %}">Aviso de privacidad · versión integral y simplificada</a>
+    · <a href="{% url 'solicitud_arco' %}">Ejercer derechos ARCO</a>
+    · <a href="{% url 'solicitar_revision_pronostico' %}">Solicitar revisión humana de pronóstico</a>
+  </footer>
+</body>
+</html>

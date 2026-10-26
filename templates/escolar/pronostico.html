@@ -4,11 +4,16 @@
 <div class="page-header">
   <div class="page-header-text">
     <h2>Pronóstico con IA</h2>
-    <p>Regresión lineal sobre parciales 1 y 2 para predecir el parcial 3 — mínimo aprobatorio: <strong>{{ minimo }}</strong></p>
+    <p>Extrapolación lineal de los parciales 1 y 2 para estimar el parcial 3 — mínimo aprobatorio: <strong>{{ minimo }}</strong></p>
   </div>
   {% if grupo_sel %}
   <a href="{% url 'exportar_pronostico' %}?grupo={{ grupo_sel.id }}" class="btn btn-success btn-sm">Exportar pronóstico Excel</a>
   {% endif %}
+</div>
+
+<div class="card" role="note" style="margin-bottom:20px;border-left:4px solid var(--warning);">
+  <strong>Estimación orientativa; requiere revisión humana.</strong>
+  El pronóstico no determina ni modifica el estatus académico del alumno.
 </div>
 
 <div class="toolbar" style="margin-bottom:20px;">
@@ -23,22 +28,34 @@
 
 {% if grupo_sel %}
 
+<div class="card" style="margin-bottom:20px;">
+  <div class="section-title">Métricas del modelo {{ version_modelo }}</div>
+  <p style="margin:0 0 12px;color:var(--text-muted);font-size:13px;">
+    Evaluación retrospectiva: pronóstico de P3 calculado con P1 y P2, comparado con P3 observado.
+    Muestras evaluadas: <strong>{{ metricas_modelo.muestras }}</strong>.
+  </p>
+  <div style="display:flex;gap:24px;flex-wrap:wrap;">
+    <span>R²: <strong>{% if metricas_modelo.r2 is not None %}{{ metricas_modelo.r2 }}{% else %}N/D{% endif %}</strong></span>
+    <span>MAE: <strong>{% if metricas_modelo.mae is not None %}{{ metricas_modelo.mae }}{% else %}N/D{% endif %}</strong></span>
+  </div>
+</div>
+
 <!-- KPIs pronóstico -->
 <div class="stat-grid" style="margin-bottom:20px;">
   <div class="stat-card sc-primary">
     <div class="stat-card-blob"></div>
-    <div class="stat-label">Alumnos evaluados</div>
+    <div class="stat-label">Alumnos con estimación</div>
     <div class="stat-value">{{ stats_grupo.total }}</div>
   </div>
   <div class="stat-card sc-success">
     <div class="stat-card-blob"></div>
-    <div class="stat-label">Pronóstico aprobados</div>
+    <div class="stat-label">Estimaciones sobre mínimo</div>
     <div class="stat-value">{{ stats_grupo.aprobados }}</div>
     <div class="stat-sub">{{ stats_grupo.pct_aprobacion }}% estimado</div>
   </div>
   <div class="stat-card sc-danger">
     <div class="stat-card-blob"></div>
-    <div class="stat-label">Pronóstico reprobados</div>
+    <div class="stat-label">Estimaciones bajo mínimo</div>
     <div class="stat-value">{{ stats_grupo.reprobados }}</div>
     <div class="stat-sub">{{ stats_grupo.pct_reprobacion }}% estimado</div>
   </div>
@@ -63,16 +80,19 @@
 <!-- Índices por asignatura -->
 {% if indices_asig %}
 <div class="card" style="margin-bottom:24px;">
-  <div class="section-title">Índice por asignatura (pronóstico)</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+    <div class="section-title" style="margin-bottom:0;">Índice por asignatura (pronóstico)</div>
+    <a href="{% url 'exportar_indices_pronostico' %}?grupo={{ grupo_sel.id }}" class="btn btn-success btn-sm">↓ Exportar Excel</a>
+  </div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Asignatura</th><th>Promedio esperado</th><th>Aprobados</th><th>Reprobados</th><th>% Aprobación</th></tr></thead>
+      <thead><tr><th>Asignatura</th><th>Promedio esperado</th><th>Sobre mínimo</th><th>Bajo mínimo</th><th>% estimado sobre mínimo</th></tr></thead>
       <tbody>
         {% for item in indices_asig %}
         <tr>
           <td style="font-weight:600;">{{ item.asignatura.nombre }} <span class="badge badge-primary" style="margin-left:6px;">{{ item.asignatura.clave }}</span></td>
           <td><span class="score {% if item.promedio >= minimo %}score-high{% elif item.promedio >= 5 %}score-med{% else %}score-low{% endif %}">{{ item.promedio }}</span></td>
-          <td><span class="badge badge-success">{{ item.aprobados }}</span></td>
+              <td><span class="badge badge-success">{{ item.aprobados }}</span></td>
           <td><span class="badge badge-danger">{{ item.reprobados }}</span></td>
           <td>
             <div style="display:flex;align-items:center;gap:8px;">
@@ -115,7 +135,7 @@
         {{ dato.promedio_global }}
       </div>
       <span class="badge {% if dato.promedio_global >= minimo %}badge-success{% else %}badge-danger{% endif %}">
-        {% if dato.promedio_global >= minimo %}Aprobado{% else %}En riesgo{% endif %}
+        {% if dato.promedio_global >= minimo %}Estimación sobre mínimo{% else %}Posible riesgo{% endif %}
       </span>
       {% endif %}
       {% for a in dato.asignaturas %}{% if a.riesgo %}<span class="badge badge-danger" style="font-size:10px;">{{ a.asignatura.clave }}</span>{% endif %}{% endfor %}
@@ -126,20 +146,30 @@
   <div class="alumno-pron-detail" id="det-{{ forloop.counter }}">
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Asignatura</th><th>P1</th><th>P2</th><th>P3</th><th>Pronóstico P3</th><th>Tendencia</th><th>Estado</th></tr></thead>
+        <thead><tr><th>Asignatura</th><th>P1</th><th>P2</th><th>P3 observado</th><th>Estimación P3</th><th>Tendencia</th><th>Indicador orientativo</th></tr></thead>
         <tbody>
           {% for a in dato.asignaturas %}
           <tr style="{% if a.riesgo %}background:#fff5f5;{% endif %}">
             <td style="font-weight:600;">{{ a.asignatura.nombre }}</td>
             {% for p in a.promedios %}
-            <td style="text-align:center;font-weight:700;font-size:13px;color:{% if p >= minimo %}var(--success){% else %}var(--danger){% endif %};">{{ p }}</td>
+            <td style="text-align:center;font-weight:700;font-size:13px;color:{% if p.valor is not None and p.valor >= minimo %}var(--success){% elif p.valor is not None %}var(--danger){% else %}var(--text-light){% endif %};">{% if p.valor is not None %}{{ p.valor }}{% else %}—{% endif %}</td>
             {% endfor %}
-            {% if a.promedios|length < 1 %}<td style="text-align:center;color:var(--text-light);">—</td>{% endif %}
-            {% if a.promedios|length < 2 %}<td style="text-align:center;color:var(--text-light);">—</td>{% endif %}
-            {% if a.promedios|length < 3 %}<td style="text-align:center;color:var(--text-light);">—</td>{% endif %}
             <td style="text-align:center;">
               {% if a.pronostico is not None %}
               <span style="font-family:'Fraunces',serif;font-size:17px;font-weight:700;color:{% if a.pronostico >= minimo %}var(--success){% else %}var(--danger){% endif %};">{{ a.pronostico }}</span>
+              <details style="margin-top:6px;text-align:left;">
+                <summary style="cursor:pointer;font-size:11px;">Factores y coeficientes</summary>
+                <table style="font-size:11px;margin-top:6px;">
+                  <thead><tr><th>Variable</th><th>Valor</th><th>Coeficiente</th><th>Coef. × valor</th></tr></thead>
+                  <tbody>
+                    {% for factor in a.factores %}
+                    <tr><td>{{ factor.variable }}</td><td>{{ factor.valor }}</td><td>{{ factor.coeficiente }}</td><td>{{ factor.contribucion }}</td></tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+                <p style="font-size:11px;color:var(--text-muted);">Estimación: suma de coeficiente × promedio observado, limitada al rango 0–10.</p>
+              </details>
+              <div><a class="btn btn-secondary btn-sm" href="{% url 'solicitar_revision_pronostico' %}?pronostico={{ a.pronostico_log_id }}" style="margin-top:6px;">Solicitar revisión humana</a></div>
               {% else %}<span style="color:var(--text-light);">N/D</span>{% endif %}
             </td>
             <td style="text-align:center;">
@@ -154,8 +184,8 @@
               {% endif %}
             </td>
             <td style="text-align:center;">
-              {% if a.riesgo %}<span class="badge badge-danger">Riesgo</span>
-              {% elif a.pronostico is not None %}<span class="badge badge-success">OK</span>
+              {% if a.riesgo %}<span class="badge badge-danger">Posible riesgo</span>
+              {% elif a.pronostico is not None %}<span class="badge badge-success">Estimación ≥ mínimo</span>
               {% else %}<span class="badge badge-gray">—</span>{% endif %}
             </td>
           </tr>

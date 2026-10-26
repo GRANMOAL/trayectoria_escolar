@@ -1,0 +1,81 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solicitud ARCO · Trayectoria Escolar</title>
+  <link rel="stylesheet" href="{% static 'css/estilos.css' %}">
+</head>
+<body class="privacy-page">
+  <main class="privacy-card">
+    <p class="text-muted">Sistema de Trayectoria Escolar</p>
+    <h1>Ejercer derechos ARCO</h1>
+    {% if success_folio %}
+    <div class="privacy-alert" role="status">
+      Recibimos tu solicitud con folio <strong>ARCO-{{ success_folio }}</strong>.
+      Coordinación verificará tu identidad antes de entregar información o efectuar cambios.
+      Conserva el folio para cualquier consulta.
+    </div>
+    {% else %}
+    <p>
+      Completa este formulario para solicitar acceso, rectificación, cancelación u oposición.
+      Esta recepción no confirma la identidad ni revela si el titular está registrado.
+    </p>
+    {% if errors %}
+    <div class="auth-error" role="alert">
+      <ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    <form method="post" class="arco-public-form">
+      {% csrf_token %}
+      <div class="form-group">
+        <label for="arco-tipo">Derecho que deseas ejercer</label>
+        <select id="arco-tipo" name="tipo" required>
+          <option value="">Seleccionar</option>
+          {% for value, label in tipo_choices %}
+          <option value="{{ value }}" {% if form_data.tipo == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="titular-nombre">Nombre completo del titular de los datos</label>
+        <input id="titular-nombre" name="titular_nombre" maxlength="150" value="{{ form_data.titular_nombre }}" required>
+      </div>
+      <div class="form-group">
+        <label for="numero-cuenta">Número de cuenta</label>
+        <input id="numero-cuenta" name="numero_cuenta" maxlength="20" value="{{ form_data.numero_cuenta }}" required>
+      </div>
+      <div class="form-group">
+        <label for="solicitante">Nombre de quien presenta la solicitud</label>
+        <input id="solicitante" name="solicitante" maxlength="150" value="{{ form_data.solicitante }}" required>
+      </div>
+      <div class="form-group">
+        <label for="parentesco">Relación con el titular (si presenta madre, padre o tutor)</label>
+        <input id="parentesco" name="parentesco" maxlength="30" value="{{ form_data.parentesco }}">
+      </div>
+      <div class="form-group">
+        <label for="contacto-email">Correo de contacto</label>
+        <input id="contacto-email" type="email" name="contacto_email" maxlength="254" value="{{ form_data.contacto_email }}" required>
+      </div>
+      <div class="form-group">
+        <label for="descripcion">Describe la información o acción que solicitas</label>
+        <textarea id="descripcion" name="descripcion" rows="5" maxlength="4000" required>{{ form_data.descripcion }}</textarea>
+      </div>
+      <label class="privacy-consent-label">
+        <input type="checkbox" name="confirmacion" required>
+        Confirmo que la información es correcta y autorizo el uso de mis datos de contacto para tramitar esta solicitud.
+      </label>
+      <button class="btn btn-primary" type="submit">Enviar solicitud</button>
+    </form>
+    {% endif %}
+    <nav class="auth-links" aria-label="Información de privacidad">
+      <a href="{% url 'aviso_privacidad' %}">Aviso de privacidad</a>
+      · <a href="{% url 'login' %}">Iniciar sesión</a>
+    </nav>
+  </main>
+  <footer class="privacy-footer">
+    Sistema de Trayectoria Escolar · Solicitudes sujetas a verificación de identidad.
+  </footer>
+</body>
+</html>

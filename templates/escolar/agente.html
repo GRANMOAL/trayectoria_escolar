@@ -1,0 +1,122 @@
+{% extends 'escolar/base.html' %}
+{% block title %}Agente IA{% endblock %}
+{% block content %}
+<style>
+  .chat-box { display:flex; flex-direction:column; height:calc(100vh - 290px); min-height:360px; padding:0; overflow:hidden; }
+  .chat-log { flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:12px; background:var(--bg); }
+  .msg { max-width:78%; padding:11px 15px; border-radius:14px; font-size:14px; line-height:1.55; white-space:pre-wrap; word-wrap:break-word; }
+  .msg.user { align-self:flex-end; background:var(--primary); color:#fff; border-bottom-right-radius:4px; }
+  .msg.bot { align-self:flex-start; background:var(--bg-card); border:1px solid var(--border); color:var(--text-primary); border-bottom-left-radius:4px; }
+  .chat-input { display:flex; gap:10px; padding:14px; border-top:1px solid var(--border); background:var(--bg-card); }
+  .chat-input textarea { flex:1; resize:none; border:1px solid var(--border); border-radius:10px; padding:10px 12px; font:inherit; font-size:14px; }
+  .sugerencias { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+  .sugerencias .chip { cursor:pointer; }
+  .sugerencias .chip:hover { border-color:var(--primary); color:var(--primary); }
+  .dot { width:9px; height:9px; border-radius:50%; display:inline-block; background:var(--text-light); margin-right:6px; }
+  .dot.ok { background:var(--success); } .dot.err { background:var(--danger); }
+</style>
+
+<div class="page-header">
+  <div class="page-header-text">
+    <h2>Agente IA</h2>
+    <p>Asistente académico con Ollama · modelo <strong>{{ modelo }}</strong> (local, tus datos no salen del equipo)</p>
+  </div>
+  <span class="chip" id="estado"><span class="dot"></span>Comprobando Ollama…</span>
+</div>
+
+<div class="toolbar" style="margin-bottom:16px;">
+  <div class="form-group">
+    <label>Grupo (contexto)</label>
+    <select id="grupo">
+      <option value="">— Sin grupo —</option>
+      {% for g in grupos %}<option value="{{ g.id }}">{{ g.semestre.nombre }} — Grupo {{ g.nombre }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="form-group">
+    <label>Alumno (opcional)</label>
+    <select id="alumno" disabled><option value="">— Todos —</option></select>
+  </div>
+  <div class="form-group" style="align-self:flex-end;">
+    <button class="btn btn-sm" id="limpiar" type="button">Limpiar chat</button>
+  </div>
+</div>
+
+<div class="sugerencias" id="sugerencias">
+  <span class="chip" data-q="¿Qué alumnos están en riesgo de reprobar y por qué?">Alumnos en riesgo</span>
+  <span class="chip" data-q="Resume el desempeño del grupo por asignatura y señala las más débiles.">Resumen del grupo</span>
+  <span class="chip" data-q="Propón un plan de seguimiento para los alumnos en riesgo.">Plan de seguimiento</span>
+  <span class="chip" data-q="Redacta una observación breve para el tutor sobre el alumno seleccionado.">Nota para el tutor</span>
+</div>
+
+<div class="card chat-box">
+  <div class="chat-log" id="log">
+    <div class="msg bot">Hola 👋 Selecciona un grupo (y opcionalmente un alumno) para que tenga el contexto de sus calificaciones, y pregúntame lo que necesites.</div>
+  </div>
+  <div class="chat-input">
+    {% csrf_token %}
+    <textarea id="texto" rows="2" placeholder="Escribe tu pregunta… (Enter envía, Shift+Enter salto de línea)"></textarea>
+    <button class="btn btn-primary" id="enviar" type="button">Enviar</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const log = $('log'), texto = $('texto'), enviar = $('enviar');
+  const csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
+  let historial = [], ocupado = false;
+
+  fetch('{% url "agente_estado_api" %}').then(r => r.json()).then(e => {
+    const el = $('estado'); let cls = 'err', msg;
+    if (!e.servidor) msg = 'Ollama no disponible';
+    else if (!e.modelo_instalado) msg = `Falta modelo: ollama pull ${e.modelo}`;
+    else { cls = 'ok'; msg = `${e.modelo} listo`; }
+    el.innerHTML = `<span class="dot ${cls}"></span>${msg}`;
+  }).catch(() => { $('estado').innerHTML = '<span class="dot err"></span>Sin conexión'; });
+
+  $('grupo').addEventListener('change', async e => {
+    const sel = $('alumno'); sel.innerHTML = '<option value="">— Todos —</option>';
+    sel.disabled = !e.target.value;
+    if (!e.target.value) return;
+    const d = await (await fetch(`{% url "agente_alumnos_api" %}?grupo_id=${e.target.value}`)).json();
+    d.alumnos.forEach(a => sel.add(new Option(a.nombre, a.id)));
+  });
+
+  function burbuja(rol, t) {
+    const d = document.createElement('div');
+    d.className = 'msg ' + (rol === 'user' ? 'user' : 'bot'); d.textContent = t;
+    log.appendChild(d); log.scrollTop = log.scrollHeight; return d;
+  }
+
+  async function mandar(pregunta) {
+    if (ocupado || !pregunta.trim()) return;
+    ocupado = true; enviar.disabled = true;
+    historial.push({role: 'user', content: pregunta});
+    burbuja('user', pregunta); texto.value = '';
+    const out = burbuja('bot', '…'); let acum = '';
+    try {
+      const resp = await fetch('{% url "agente_chat_api" %}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+        body: JSON.stringify({mensajes: historial, grupo_id: $('grupo').value, alumno_id: $('alumno').value}),
+      });
+      const rd = resp.body.getReader(), dec = new TextDecoder();
+      while (true) {
+        const {done, value} = await rd.read(); if (done) break;
+        acum += dec.decode(value, {stream: true});
+        out.textContent = acum; log.scrollTop = log.scrollHeight;
+      }
+      historial.push({role: 'assistant', content: acum});
+    } catch (err) {
+      out.textContent = '⚠️ Error de comunicación con el servidor.';
+    }
+    ocupado = false; enviar.disabled = false; texto.focus();
+  }
+
+  enviar.onclick = () => mandar(texto.value);
+  texto.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); mandar(texto.value); } });
+  document.querySelectorAll('#sugerencias .chip').forEach(c => c.onclick = () => mandar(c.dataset.q));
+  $('limpiar').onclick = () => { historial = []; log.innerHTML = ''; burbuja('bot', 'Chat reiniciado. ¿En qué te ayudo?'); };
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,73 @@
+{% extends 'escolar/base.html' %}
+{% block title %}Revisiones de pronóstico{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-header-text">
+    <h2>Revisión humana de pronósticos</h2>
+    <p>Seguimiento de solicitudes enviadas por alumnos, madres, padres y tutores.</p>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:20px;">
+  <div class="section-title">Solicitudes</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Folio</th><th>Alumno / asignatura</th><th>Solicitante</th><th>Estado</th><th>Recibida</th><th>Responsable</th></tr></thead>
+      <tbody>
+        {% for solicitud in solicitudes %}
+        <tr>
+          <td><a href="{% url 'coordinacion_pronosticos' %}?solicitud={{ solicitud.id }}">REV-{{ solicitud.id }}</a></td>
+          <td>
+            {{ solicitud.alumno.nombre_completo|default:"Titular anonimizado" }}<br>
+            <span class="text-muted">{{ solicitud.pronostico.asignatura.nombre|default:"Asignatura no disponible" }}</span>
+          </td>
+          <td>{{ solicitud.solicitante }}<br><span class="text-muted">{{ solicitud.get_parentesco_display }}</span></td>
+          <td>{{ solicitud.get_estado_display }}</td>
+          <td>{{ solicitud.fecha_solicitud|date:"d/m/Y H:i" }}</td>
+          <td>{{ solicitud.responsable|default:"Sin asignar" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6">No hay solicitudes de revisión humana.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if seleccionada %}
+<div class="card">
+  <div class="section-title">Expediente REV-{{ seleccionada.id }}</div>
+  <dl class="arco-details">
+    <dt>Pronóstico</dt><dd>{{ seleccionada.pronostico.salida.pronostico_p3|default:"No disponible" }} · {{ seleccionada.pronostico.asignatura.nombre|default:"Asignatura no disponible" }}</dd>
+    <dt>Solicitante</dt><dd>{{ seleccionada.solicitante }} · {{ seleccionada.get_parentesco_display }}</dd>
+    <dt>Correo de contacto</dt><dd>{{ seleccionada.contacto_email }}</dd>
+    <dt>Motivo</dt><dd>{{ seleccionada.motivo }}</dd>
+    <dt>Fecha recibida</dt><dd>{{ seleccionada.fecha_solicitud|date:"d/m/Y H:i" }}</dd>
+    <dt>Última actualización</dt><dd>{{ seleccionada.fecha_actualizacion|date:"d/m/Y H:i" }}</dd>
+  </dl>
+  <form method="post" class="arco-action-form">
+    {% csrf_token %}
+    <input type="hidden" name="solicitud" value="{{ seleccionada.id }}">
+    <div class="form-group">
+      <label for="revision-estado">Estado</label>
+      <select id="revision-estado" name="estado">
+        {% for value, label in estado_choices %}
+        <option value="{{ value }}" {% if seleccionada.estado == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="revision-respuesta">Respuesta / seguimiento</label>
+      <textarea id="revision-respuesta" name="respuesta" rows="4">{{ seleccionada.respuesta }}</textarea>
+    </div>
+    <button class="btn btn-primary" type="submit">Guardar seguimiento</button>
+  </form>
+  <div class="section-title" style="margin-top:24px;">Bitácora</div>
+  <ul>
+    {% for evento in seleccionada.eventos.all %}
+    <li>{{ evento.fecha_hora|date:"d/m/Y H:i" }} · {{ evento.accion }}{% if evento.actor %} · {{ evento.actor }}{% endif %}</li>
+    {% empty %}<li>Sin movimientos registrados.</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endblock %}

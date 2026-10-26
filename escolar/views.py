@@ -1,23 +1,146 @@
 import json as _json
 import io
 import base64
-from django.shortcuts import render, get_object_or_404, redirect
-from django.http import HttpResponse, JsonResponse
+import hashlib
+from datetime import timedelta
+from decimal import Decimal, InvalidOperation
+from urllib.parse import urlencode
+from django.conf import settings
+from django.contrib.auth.views import LoginView
+from django.shortcuts import render, get_object_or_404, redirect, resolve_url
+from django.http import Http404, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.contrib import messages
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 import openpyxl
+from django.contrib import messages
+from django.contrib.auth import logout
+from django.db.models import Count, Q
+from django.db import transaction
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from matplotlib.colors import LinearSegmentedColormap
 from openpyxl.utils import get_column_letter
+from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils import timezone
+from django.views.decorators.http import require_POST
 
-from .models import Semestre, Grupo, Alumno, Asignatura, Calificacion
+from .models import (
+    Semestre, Grupo, Alumno, Asignatura, Calificacion, AvisoPrivacidadAceptacion,
+    Consentimiento, Nota, SolicitudARCO, SolicitudARCOEvento,
+    PronosticoLog, SolicitudRevisionPronostico,
+    SolicitudRevisionPronosticoEvento,
+)
+from .pronosticos import VERSION_MODELO, explicar_pronostico, metricas_validacion
+from .privacidad import (
+    PRIVACY_NOTICE_DATE, PRIVACY_NOTICE_VERSION, alumnos_con_consentimiento,
+    consentimiento_requerido,
+)
 
 # ── Constante global ──────────────────────────────────────────────────────────
 MINIMO = 7.0   # calificación mínima aprobatoria
+CALIFICACION_MINIMA = Decimal('0')
+CALIFICACION_MAXIMA = Decimal('10')
+
+
+def validar_calificacion(valor):
+    try:
+        calificacion = Decimal(str(valor))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValueError('Cada calificación debe ser un número entre 0 y 10.') from None
+
+    if not calificacion.is_finite() or not CALIFICACION_MINIMA <= calificacion <= CALIFICACION_MAXIMA:
+        raise ValueError('Cada calificación debe estar entre 0 y 10.')
+    if calificacion.as_tuple().exponent < -2:
+        raise ValueError('Se permiten hasta dos decimales por calificación.')
+    return calificacion
+
+
+def metricas_grupo_pronostico(calificaciones):
+    promedios = {}
+    for calificacion in calificaciones:
+        promedios.setdefault(
+            (calificacion.alumno_id, calificacion.asignatura_id),
+            {},
+        )[calificacion.parcial] = calificacion.promedio
+    evaluaciones = []
+    for parciales in promedios.values():
+        if all(parcial in parciales for parcial in (1, 2, 3)):
+            prediccion = explicar_pronostico(parciales)
+            evaluaciones.append((prediccion['pronostico'], parciales[3]))
+    return metricas_validacion(evaluaciones)
+
+
+def registrar_pronostico(alumno, asignatura, estimacion, metricas):
+    entradas = estimacion['entradas']
+    huella_datos = {
+        'version': VERSION_MODELO,
+        'alumno': alumno.pk,
+        'asignatura': asignatura.pk,
+        'entradas': entradas,
+        'metricas_validacion': metricas,
+    }
+    huella = hashlib.sha256(
+        _json.dumps(huella_datos, sort_keys=True).encode('utf-8')
+    ).hexdigest()
+    log, _ = PronosticoLog.objects.get_or_create(
+        alumno=alumno,
+        asignatura=asignatura,
+        version_modelo=VERSION_MODELO,
+        huella_entradas=huella,
+        defaults={
+            'entradas_agregadas': {
+                'parciales': [
+                    {'parcial': 1, 'promedio': entradas['P1']},
+                    {'parcial': 2, 'promedio': entradas['P2']},
+                ],
+            },
+            'salida': {
+                'pronostico_p3': estimacion['pronostico'],
+                'factores': estimacion['factores'],
+                'metricas_validacion': metricas,
+            },
+        },
+    )
+    return log
+
+
+def grupos_con_conteo_alumnos():
+    grupos = Grupo.objects.select_related('semestre')
+    if not consentimiento_requerido():
+        return grupos.annotate(
+            alumnos_con_consentimiento=Count(
+                'alumnos',
+                filter=Q(
+                    alumnos__bloqueado_arco=False,
+                    alumnos__suprimido_arco=False,
+                ),
+                distinct=True,
+            ),
+        )
+    return grupos.annotate(
+        alumnos_con_consentimiento=Count(
+            'alumnos',
+            filter=Q(
+                alumnos__consentimientos__estado=Consentimiento.ESTADO_VIGENTE,
+                alumnos__consentimientos__version_aviso=PRIVACY_NOTICE_VERSION,
+                alumnos__bloqueado_arco=False,
+                alumnos__suprimido_arco=False,
+            ),
+            distinct=True,
+        ),
+    )
+
+
+class LoginRequiringPrivacyAcceptanceView(LoginView):
+    def get_success_url(self):
+        next_url = self.get_redirect_url() or resolve_url(settings.LOGIN_REDIRECT_URL)
+        return f"{reverse('privacy_acceptance')}?{urlencode({'next': next_url})}"
+
 
 # ── Paleta de colores del sistema ─────────────────────────────────────────────
 C_PRIMARY  = '#4f46e5'
@@ -41,6 +164,613 @@ def fig2b64(fig):
     b64 = base64.b64encode(buf.read()).decode()
     plt.close(fig)
     return b64
+
+
+def aviso_privacidad(request):
+    return render(request, 'escolar/aviso_privacidad.html', {
+        'acceptance_required': False,
+        'notice_version': PRIVACY_NOTICE_VERSION,
+        'notice_date': PRIVACY_NOTICE_DATE,
+    })
+
+
+def solicitud_arco(request):
+    if request.method == 'POST':
+        data = {
+            'tipo': request.POST.get('tipo', ''),
+            'titular_nombre': request.POST.get('titular_nombre', '').strip(),
+            'numero_cuenta': request.POST.get('numero_cuenta', '').strip(),
+            'solicitante': request.POST.get('solicitante', '').strip(),
+            'parentesco': request.POST.get('parentesco', '').strip(),
+            'contacto_email': request.POST.get('contacto_email', '').strip(),
+            'descripcion': request.POST.get('descripcion', '').strip(),
+        }
+        errors = []
+        if data['tipo'] not in dict(SolicitudARCO.TIPO_CHOICES):
+            errors.append('Selecciona un derecho ARCO.')
+        if not data['titular_nombre'] or not data['numero_cuenta']:
+            errors.append('Indica el nombre y número de cuenta del titular.')
+        if not data['solicitante'] or not data['contacto_email']:
+            errors.append('Indica tu nombre y un correo de contacto.')
+        else:
+            try:
+                validate_email(data['contacto_email'])
+            except ValidationError:
+                errors.append('El correo de contacto no tiene un formato válido.')
+        if not data['descripcion']:
+            errors.append('Describe brevemente tu solicitud.')
+        if (
+            len(data['titular_nombre']) > 150
+            or len(data['numero_cuenta']) > 20
+            or len(data['solicitante']) > 150
+            or len(data['parentesco']) > 30
+            or len(data['contacto_email']) > 254
+            or len(data['descripcion']) > 4000
+        ):
+            errors.append('Uno o más campos exceden la longitud permitida.')
+        if request.POST.get('confirmacion') != 'on':
+            errors.append('Confirma que los datos son correctos.')
+
+        if not errors:
+            titular = Alumno.objects.filter(
+                numero_cuenta=data['numero_cuenta'],
+                nombre_completo__iexact=data['titular_nombre'],
+                suprimido_arco=False,
+            ).first()
+            solicitud = SolicitudARCO.objects.create(
+                **data,
+                titular=titular,
+                estado='identidad_pendiente',
+                fecha_limite=timezone.localdate() + timedelta(
+                    days=int(settings.ARCO_RESPONSE_DAYS),
+                ),
+            )
+            SolicitudARCOEvento.objects.create(
+                solicitud=solicitud,
+                accion='solicitud_recibida',
+                detalle='Solicitud recibida; pendiente de verificación de identidad.',
+            )
+            return render(request, 'escolar/solicitud_arco.html', {
+                'tipo_choices': SolicitudARCO.TIPO_CHOICES,
+                'success_folio': solicitud.pk,
+            })
+
+        return render(request, 'escolar/solicitud_arco.html', {
+            'tipo_choices': SolicitudARCO.TIPO_CHOICES,
+            'errors': errors,
+            'form_data': data,
+        })
+
+    return render(request, 'escolar/solicitud_arco.html', {
+        'tipo_choices': SolicitudARCO.TIPO_CHOICES,
+    })
+
+
+def _registrar_evento_arco(solicitud, actor, accion, detalle=''):
+    SolicitudARCOEvento.objects.create(
+        solicitud=solicitud,
+        actor=actor,
+        accion=accion,
+        detalle=detalle,
+    )
+
+
+def _datos_exportables_titular(alumno):
+    grupo = alumno.grupo
+    return {
+        'titular': {
+            'nombre_completo': alumno.nombre_completo,
+            'numero_cuenta': alumno.numero_cuenta,
+            'email': alumno.email,
+            'grupo': str(grupo) if grupo else None,
+            'fecha_registro': alumno.fecha_registro.isoformat() if alumno.fecha_registro else None,
+        },
+        'calificaciones': [
+            {
+                'asignatura': calificacion.asignatura.nombre,
+                'clave_asignatura': calificacion.asignatura.clave,
+                'parcial': calificacion.parcial,
+                'heteroevaluacion': str(calificacion.heteroevaluacion),
+                'coevaluacion': str(calificacion.coevaluacion),
+                'autoevaluacion': str(calificacion.autoevaluacion),
+                'promedio': calificacion.promedio,
+                'fecha_captura': (
+                    calificacion.fecha_captura.isoformat()
+                    if calificacion.fecha_captura else None
+                ),
+            }
+            for calificacion in alumno.calificaciones.select_related('asignatura').order_by(
+                'asignatura__nombre', 'parcial',
+            )
+        ],
+        'notas_seguimiento': [
+            {
+                'tipo': nota.tipo,
+                'texto': nota.texto,
+                'fecha': nota.fecha.isoformat(),
+            }
+            for nota in alumno.notas.order_by('fecha')
+        ],
+        'consentimientos': [
+            {
+                'tutor': consentimiento.tutor_nombre,
+                'parentesco': consentimiento.get_parentesco_display(),
+                'version_aviso': consentimiento.version_aviso,
+                'fecha_hora': consentimiento.fecha_hora.isoformat(),
+                'medio': consentimiento.get_medio_display(),
+                'estado': consentimiento.get_estado_display(),
+                'revocado_en': (
+                    consentimiento.revocado_en.isoformat()
+                    if consentimiento.revocado_en else None
+                ),
+            }
+            for consentimiento in alumno.consentimientos.order_by('fecha_hora')
+        ],
+        'pronosticos_ia': [
+            {
+                'asignatura': log.asignatura.nombre if log.asignatura else None,
+                'version_modelo': log.version_modelo,
+                'entradas_agregadas': log.entradas_agregadas,
+                'salida': log.salida,
+                'fecha': log.fecha.isoformat(),
+            }
+            for log in alumno.pronosticos_ia.select_related('asignatura').order_by('fecha')
+        ],
+    }
+
+
+def _valor_excel_seguro(valor):
+    if isinstance(valor, str) and valor.lstrip(' \t\r\n').startswith(('=', '+', '-', '@')):
+        return f"'{valor}"
+    return valor
+
+
+def coordinacion_arco(request):
+    if not request.user.is_staff:
+        return HttpResponseForbidden('Solo coordinación puede gestionar solicitudes ARCO.')
+
+    if request.method == 'POST':
+        solicitud = get_object_or_404(SolicitudARCO, pk=request.POST.get('solicitud'))
+        accion = request.POST.get('accion')
+
+        if accion == 'verificar_identidad':
+            if solicitud.estado in {'atendida', 'improcedente'}:
+                messages.error(request, 'Reabre la solicitud antes de continuar el trámite.')
+            elif request.POST.get('confirmacion_identidad') != 'on':
+                messages.error(request, 'Confirma que verificaste la identidad del solicitante.')
+            else:
+                titular_id = request.POST.get('titular')
+                if titular_id:
+                    try:
+                        titular_id = int(titular_id)
+                    except (TypeError, ValueError):
+                        titular_id = None
+                    titular = Alumno.objects.filter(
+                        pk=titular_id,
+                        suprimido_arco=False,
+                    ).first()
+                else:
+                    titular = solicitud.titular
+
+                if titular is None:
+                    messages.error(request, 'Selecciona un titular válido antes de verificar su identidad.')
+                else:
+                    solicitud.titular = titular
+                    solicitud.identidad_verificada = True
+                    solicitud.fecha_verificacion = timezone.now()
+                    solicitud.estado = 'en_revision'
+                    solicitud.responsable = request.user
+                    solicitud.save(update_fields=[
+                        'titular', 'identidad_verificada', 'fecha_verificacion',
+                        'estado', 'responsable',
+                    ])
+                    _registrar_evento_arco(
+                        solicitud, request.user, accion,
+                        'Identidad verificada y titular vinculado.',
+                    )
+                    messages.success(request, 'Identidad verificada; ya puedes tramitar la solicitud.')
+
+        elif accion == 'actualizar_solicitud':
+            estado = request.POST.get('estado', '')
+            respuesta = request.POST.get('respuesta', '').strip()
+            if estado not in dict(SolicitudARCO.ESTADO_CHOICES):
+                messages.error(request, 'Selecciona un estado válido.')
+            elif estado in {'atendida', 'improcedente'} and not respuesta:
+                messages.error(request, 'Registra la respuesta antes de cerrar la solicitud.')
+            elif estado == 'atendida' and not solicitud.identidad_verificada:
+                messages.error(request, 'Verifica la identidad antes de marcar la solicitud como atendida.')
+            else:
+                solicitud.estado = estado
+                solicitud.responsable = request.user
+                solicitud.respuesta = respuesta
+                if estado in {'recibida', 'identidad_pendiente'}:
+                    solicitud.identidad_verificada = False
+                    solicitud.fecha_verificacion = None
+                if estado in {'atendida', 'improcedente'}:
+                    solicitud.fecha_respuesta = timezone.now()
+                else:
+                    solicitud.fecha_respuesta = None
+                solicitud.save(update_fields=[
+                    'estado', 'responsable', 'respuesta', 'fecha_respuesta',
+                    'identidad_verificada', 'fecha_verificacion',
+                ])
+                _registrar_evento_arco(
+                    solicitud, request.user, accion,
+                    f'Estado actualizado a {solicitud.get_estado_display()}.',
+                )
+                messages.success(request, 'Solicitud actualizada.')
+
+        elif accion in {'exportar_json', 'exportar_excel'}:
+            alumno = solicitud.titular
+            if (
+                not solicitud.identidad_verificada
+                or alumno is None
+                or alumno.suprimido_arco
+                or solicitud.estado in {'atendida', 'improcedente'}
+            ):
+                messages.error(request, 'Verifica la identidad y vincula un titular activo antes de exportar.')
+            else:
+                datos = _datos_exportables_titular(alumno)
+                solicitud.responsable = request.user
+                solicitud.save(update_fields=['responsable'])
+                _registrar_evento_arco(
+                    solicitud, request.user, accion,
+                    'Se generó una copia de los datos para responder el derecho de acceso.',
+                )
+                if accion == 'exportar_json':
+                    response = JsonResponse(datos, json_dumps_params={'ensure_ascii': False, 'indent': 2})
+                    response['Content-Disposition'] = (
+                        f'attachment; filename="solicitud_arco_{solicitud.pk}.json"'
+                    )
+                    return response
+
+                workbook = openpyxl.Workbook()
+                titular_ws = workbook.active
+                titular_ws.title = 'Titular'
+                titular_ws.append(['Campo', 'Dato'])
+                for key, value in datos['titular'].items():
+                    titular_ws.append([key, _valor_excel_seguro(value or '')])
+                calificaciones_ws = workbook.create_sheet('Calificaciones')
+                calificaciones_ws.append([
+                    'Asignatura', 'Clave', 'Parcial', 'Heteroevaluación',
+                    'Coevaluación', 'Autoevaluación', 'Promedio', 'Fecha captura',
+                ])
+                for item in datos['calificaciones']:
+                    calificaciones_ws.append([_valor_excel_seguro(value) for value in [
+                        item['asignatura'], item['clave_asignatura'], item['parcial'],
+                        item['heteroevaluacion'], item['coevaluacion'],
+                        item['autoevaluacion'], item['promedio'], item['fecha_captura'],
+                    ]])
+                notas_ws = workbook.create_sheet('Seguimiento')
+                notas_ws.append(['Tipo', 'Texto', 'Fecha'])
+                for item in datos['notas_seguimiento']:
+                    notas_ws.append([
+                        _valor_excel_seguro(item['tipo']),
+                        _valor_excel_seguro(item['texto']),
+                        _valor_excel_seguro(item['fecha']),
+                    ])
+                consentimiento_ws = workbook.create_sheet('Consentimientos')
+                consentimiento_ws.append([
+                    'Tutor', 'Parentesco', 'Versión', 'Fecha', 'Medio', 'Estado', 'Revocado',
+                ])
+                for item in datos['consentimientos']:
+                    consentimiento_ws.append([_valor_excel_seguro(value) for value in [
+                        item['tutor'], item['parentesco'], item['version_aviso'],
+                        item['fecha_hora'], item['medio'], item['estado'], item['revocado_en'],
+                    ]])
+                pronosticos_ws = workbook.create_sheet('Pronósticos IA')
+                pronosticos_ws.append([
+                    'Asignatura', 'Versión del modelo', 'Entradas agregadas',
+                    'Salida', 'Fecha',
+                ])
+                for item in datos['pronosticos_ia']:
+                    pronosticos_ws.append([
+                        _valor_excel_seguro(item['asignatura'] or ''),
+                        _valor_excel_seguro(item['version_modelo']),
+                        _json.dumps(item['entradas_agregadas'], ensure_ascii=False),
+                        _json.dumps(item['salida'], ensure_ascii=False),
+                        item['fecha'],
+                    ])
+                output = io.BytesIO()
+                workbook.save(output)
+                response = HttpResponse(
+                    output.getvalue(),
+                    content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                )
+                response['Content-Disposition'] = (
+                    f'attachment; filename="solicitud_arco_{solicitud.pk}.xlsx"'
+                )
+                return response
+            return redirect(f"{reverse('coordinacion_arco')}?solicitud={solicitud.pk}")
+
+        elif accion == 'rectificar':
+            alumno = solicitud.titular
+            campo = request.POST.get('campo', '')
+            valor = request.POST.get('valor', '').strip()
+            campos_permitidos = {'nombre_completo', 'numero_cuenta', 'email'}
+            if (
+                not solicitud.identidad_verificada
+                or alumno is None
+                or alumno.suprimido_arco
+                or solicitud.estado in {'atendida', 'improcedente'}
+            ):
+                messages.error(request, 'Verifica la identidad y vincula un titular activo antes de rectificar.')
+            elif solicitud.tipo != 'rectificacion':
+                messages.error(request, 'Esta solicitud no corresponde al derecho de rectificación.')
+            elif campo not in campos_permitidos or not valor:
+                messages.error(request, 'Selecciona un campo permitido e indica el nuevo valor.')
+            elif request.POST.get('confirmacion') != 'on':
+                messages.error(request, 'Confirma la rectificación solicitada.')
+            else:
+                setattr(alumno, campo, valor)
+                try:
+                    alumno.full_clean()
+                except ValidationError as exc:
+                    messages.error(request, '; '.join(exc.messages))
+                else:
+                    alumno.save(update_fields=[campo])
+                    solicitud.titular_nombre = alumno.nombre_completo
+                    solicitud.numero_cuenta = alumno.numero_cuenta
+                    solicitud.responsable = request.user
+                    solicitud.save(update_fields=[
+                        'titular_nombre', 'numero_cuenta', 'responsable',
+                    ])
+                    _registrar_evento_arco(
+                        solicitud, request.user, accion,
+                        f'Se rectificó el campo {campo}; no se conservaron valores anteriores en la bitácora.',
+                    )
+                    messages.success(request, 'Dato rectificado y acción registrada.')
+
+        elif accion in {'bloquear', 'oposicion'}:
+            alumno = solicitud.titular
+            confirmacion = 'BLOQUEAR'
+            tipo_valido = (
+                (accion == 'bloquear' and solicitud.tipo == 'cancelacion')
+                or (accion == 'oposicion' and solicitud.tipo == 'oposicion')
+            )
+            if (
+                not solicitud.identidad_verificada
+                or alumno is None
+                or alumno.suprimido_arco
+                or solicitud.estado in {'atendida', 'improcedente'}
+            ):
+                messages.error(request, 'Verifica la identidad y vincula un titular activo antes de bloquear.')
+            elif not tipo_valido:
+                messages.error(request, 'La acción no corresponde al derecho solicitado.')
+            elif request.POST.get('confirmacion') != confirmacion:
+                messages.error(request, 'Escribe BLOQUEAR para confirmar la acción.')
+            else:
+                alumno.bloqueado_arco = True
+                alumno.save(update_fields=['bloqueado_arco'])
+                solicitud.responsable = request.user
+                solicitud.save(update_fields=['responsable'])
+                _registrar_evento_arco(
+                    solicitud, request.user, accion,
+                    'Acceso a datos del titular bloqueado en los módulos de la plataforma.',
+                )
+                messages.success(request, 'El titular quedó bloqueado en la plataforma.')
+
+        elif accion == 'desbloquear':
+            alumno = solicitud.titular
+            if (
+                not solicitud.identidad_verificada
+                or alumno is None
+                or alumno.suprimido_arco
+                or solicitud.estado in {'atendida', 'improcedente'}
+            ):
+                messages.error(request, 'No es posible desbloquear el titular de esta solicitud.')
+            elif request.POST.get('confirmacion') != 'DESBLOQUEAR':
+                messages.error(request, 'Escribe DESBLOQUEAR para confirmar la acción.')
+            else:
+                alumno.bloqueado_arco = False
+                alumno.save(update_fields=['bloqueado_arco'])
+                solicitud.responsable = request.user
+                solicitud.save(update_fields=['responsable'])
+                _registrar_evento_arco(
+                    solicitud, request.user, accion,
+                    'Se retiró el bloqueo de acceso a los datos del titular.',
+                )
+                messages.success(request, 'El bloqueo fue retirado.')
+
+        elif accion == 'suprimir':
+            alumno = solicitud.titular
+            if (
+                not solicitud.identidad_verificada
+                or alumno is None
+                or alumno.suprimido_arco
+                or solicitud.estado in {'atendida', 'improcedente'}
+            ):
+                messages.error(request, 'Verifica la identidad y vincula un titular activo antes de suprimir.')
+            elif solicitud.tipo != 'cancelacion':
+                messages.error(request, 'Esta solicitud no corresponde al derecho de cancelación.')
+            elif request.POST.get('confirmacion') != 'SUPRIMIR':
+                messages.error(request, 'Escribe SUPRIMIR para confirmar la anonimización.')
+            else:
+                with transaction.atomic():
+                    calificaciones_eliminadas, _ = Calificacion.objects.filter(
+                        alumno=alumno,
+                    ).delete()
+                    notas_eliminadas, _ = Nota.objects.filter(alumno=alumno).delete()
+                    SolicitudRevisionPronostico.objects.filter(alumno=alumno).update(
+                        alumno=None,
+                        pronostico=None,
+                        solicitante='',
+                        contacto_email='',
+                        motivo='',
+                        respuesta='',
+                    )
+                    PronosticoLog.objects.filter(alumno=alumno).delete()
+                    Consentimiento.objects.filter(alumno=alumno).update(
+                        alumno=None,
+                        tutor_nombre='',
+                    )
+                    SolicitudARCO.objects.filter(titular=alumno).update(
+                        titular=None,
+                        titular_nombre='',
+                        numero_cuenta='',
+                        solicitante='',
+                        parentesco='',
+                        contacto_email='',
+                        descripcion='',
+                        identidad_verificada=False,
+                        fecha_verificacion=None,
+                    )
+                    alumno.nombre_completo = f'Registro anonimizado {alumno.pk}'
+                    alumno.numero_cuenta = f'ANON-{alumno.pk}'
+                    alumno.email = ''
+                    alumno.grupo = None
+                    alumno.bloqueado_arco = True
+                    alumno.suprimido_arco = True
+                    alumno.save(update_fields=[
+                        'nombre_completo', 'numero_cuenta', 'email', 'grupo',
+                        'bloqueado_arco', 'suprimido_arco',
+                    ])
+                    solicitud.refresh_from_db()
+                    solicitud.estado = 'atendida'
+                    solicitud.fecha_respuesta = timezone.now()
+                    solicitud.responsable = request.user
+                    solicitud.respuesta = (
+                        'Solicitud ejecutada: los datos académicos fueron eliminados y '
+                        'los identificadores del titular fueron anonimizados.'
+                    )
+                    solicitud.save(update_fields=[
+                        'estado', 'fecha_respuesta', 'responsable', 'respuesta',
+                    ])
+                    _registrar_evento_arco(
+                        solicitud, request.user, accion,
+                        f'Se eliminaron {calificaciones_eliminadas} registros de calificación '
+                        f'y {notas_eliminadas} registros de seguimiento; titular anonimizado y bloqueado.',
+                    )
+                messages.success(request, 'Datos académicos suprimidos y titular anonimizado.')
+
+        return redirect(f"{reverse('coordinacion_arco')}?solicitud={solicitud.pk}")
+
+    solicitudes = SolicitudARCO.objects.select_related('titular', 'responsable').all()
+    seleccionada = None
+    if request.GET.get('solicitud'):
+        seleccionada = get_object_or_404(
+            SolicitudARCO.objects.select_related('titular', 'responsable'),
+            pk=request.GET['solicitud'],
+        )
+    return render(request, 'escolar/coordinacion_arco.html', {
+        'solicitudes': solicitudes,
+        'seleccionada': seleccionada,
+        'titulares': Alumno.objects.filter(suprimido_arco=False).order_by('nombre_completo'),
+        'estado_choices': SolicitudARCO.ESTADO_CHOICES,
+        'campo_choices': [
+            ('nombre_completo', 'Nombre completo'),
+            ('numero_cuenta', 'Número de cuenta'),
+            ('email', 'Correo electrónico'),
+        ],
+        'export_actions': [
+            ('exportar_json', 'Descargar JSON'),
+            ('exportar_excel', 'Descargar Excel'),
+        ],
+        'arco_response_days': int(settings.ARCO_RESPONSE_DAYS),
+        'hoy': timezone.localdate(),
+    })
+
+
+def aceptar_aviso_privacidad(request):
+    if request.method != 'POST':
+        return render(request, 'escolar/aviso_privacidad.html', {
+            'acceptance_required': True,
+            'notice_version': PRIVACY_NOTICE_VERSION,
+            'notice_date': PRIVACY_NOTICE_DATE,
+        })
+
+    if request.POST.get('decision') != 'aceptar' or request.POST.get('aceptacion') != 'on':
+        logout(request)
+        messages.warning(request, 'Para ingresar al sistema debes aceptar el aviso de privacidad.')
+        return redirect('login')
+
+    AvisoPrivacidadAceptacion.objects.get_or_create(
+        usuario=request.user,
+        version=PRIVACY_NOTICE_VERSION,
+    )
+    next_url = request.POST.get('next', '')
+    if not url_has_allowed_host_and_scheme(
+        next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        next_url = reverse('dashboard')
+    return redirect(next_url)
+
+
+def gestionar_consentimientos(request):
+    if request.method == 'POST':
+        alumno = get_object_or_404(Alumno, pk=request.POST.get('alumno'))
+        tutor_nombre = request.POST.get('tutor_nombre', '').strip()
+        parentesco = request.POST.get('parentesco', '')
+        medio = request.POST.get('medio', '')
+        valid_parentesco = dict(Consentimiento.PARENTESCO_CHOICES)
+        valid_medios = dict(Consentimiento.MEDIO_CHOICES)
+
+        if (
+            not tutor_nombre
+            or parentesco not in valid_parentesco
+            or medio not in valid_medios
+            or request.POST.get('aceptacion') != 'on'
+        ):
+            messages.error(request, 'Completa los datos del tutor y confirma el consentimiento.')
+        else:
+            with transaction.atomic():
+                Consentimiento.objects.filter(
+                    alumno=alumno,
+                    estado=Consentimiento.ESTADO_VIGENTE,
+                ).update(
+                    estado=Consentimiento.ESTADO_REVOCADO,
+                    revocado_en=timezone.now(),
+                )
+                Consentimiento.objects.create(
+                    alumno=alumno,
+                    tutor_nombre=tutor_nombre,
+                    parentesco=parentesco,
+                    version_aviso=PRIVACY_NOTICE_VERSION,
+                    medio=medio,
+                    registrado_por=request.user,
+                )
+            messages.success(request, f'Consentimiento registrado para {alumno.nombre_completo}.')
+        return redirect('gestionar_consentimientos')
+
+    consentimientos = {}
+    for consentimiento in Consentimiento.objects.select_related('alumno').order_by('-fecha_hora'):
+        consentimientos.setdefault(consentimiento.alumno_id, consentimiento)
+    alumnos = Alumno.objects.select_related('grupo__semestre').order_by('nombre_completo')
+    filas = [
+        {
+            'alumno': alumno,
+            'consentimiento': consentimiento,
+            'vigente': (
+                consentimiento is not None
+                and consentimiento.estado == Consentimiento.ESTADO_VIGENTE
+                and consentimiento.version_aviso == PRIVACY_NOTICE_VERSION
+            ),
+        }
+        for alumno in alumnos
+        for consentimiento in [consentimientos.get(alumno.id)]
+    ]
+    return render(request, 'escolar/consentimientos.html', {
+        'filas': filas,
+        'notice_version': PRIVACY_NOTICE_VERSION,
+        'consent_required': consentimiento_requerido(),
+        'parentesco_choices': Consentimiento.PARENTESCO_CHOICES,
+        'medio_choices': Consentimiento.MEDIO_CHOICES,
+    })
+
+
+@require_POST
+def revocar_consentimiento(request, consentimiento_id):
+    consentimiento = get_object_or_404(Consentimiento, pk=consentimiento_id)
+    if consentimiento.estado == Consentimiento.ESTADO_VIGENTE:
+        consentimiento.estado = Consentimiento.ESTADO_REVOCADO
+        consentimiento.revocado_en = timezone.now()
+        consentimiento.save(update_fields=['estado', 'revocado_en'])
+        messages.success(request, 'El consentimiento fue revocado.')
+    else:
+        messages.warning(request, 'Ese consentimiento ya estaba revocado.')
+    return redirect('gestionar_consentimientos')
 
 
 def base_ax(ax, title=None, ylabel=None, xlabel=None):
@@ -101,8 +831,13 @@ def estilo_excel():
 # Gráficas reutilizables (cada una tiene un propósito único)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def grafica_pastel_aprobacion(aprobados, reprobados, titulo='Aprobación del grupo'):
-    """Pie chart: aprobados vs reprobados."""
+def grafica_pastel_aprobacion(
+    aprobados,
+    reprobados,
+    titulo='Aprobación del grupo',
+    etiquetas=('Aprobados', 'Reprobados'),
+):
+    """Pie chart: approved and below-threshold counts."""
     fig, ax = plt.subplots(figsize=(4.8, 4), facecolor=C_BG)
     ax.set_facecolor(C_BG)
     total = aprobados + reprobados
@@ -114,7 +849,7 @@ def grafica_pastel_aprobacion(aprobados, reprobados, titulo='Aprobación del gru
         explode = (0.04, 0)
         wedges, texts, autotexts = ax.pie(
             [aprobados, reprobados],
-            labels=[f'Aprobados\n{aprobados}', f'Reprobados\n{reprobados}'],
+            labels=[f'{etiquetas[0]}\n{aprobados}', f'{etiquetas[1]}\n{reprobados}'],
             colors=colors, autopct='%1.1f%%', startangle=90,
             explode=explode, wedgeprops={'edgecolor': 'white', 'linewidth': 2},
             textprops={'fontsize': 10, 'color': C_TEXT}
@@ -190,12 +925,16 @@ def grafica_alumnos_barras(promedios_dict, titulo='Ranking de alumnos'):
     return fig2b64(fig)
 
 
-def grafica_riesgo_asignaturas(riesgo_dict, titulo='Alumnos en riesgo por asignatura'):
+def grafica_riesgo_asignaturas(
+    riesgo_dict,
+    titulo='Alumnos en riesgo por asignatura',
+    ylabel='Alumnos en riesgo',
+):
     """Bar chart showing at-risk students per subject."""
     nombres = list(riesgo_dict.keys())
     vals = list(riesgo_dict.values())
     fig, ax = plt.subplots(figsize=(max(6, len(nombres) * 1.1), 4), facecolor=C_BG)
-    base_ax(ax, titulo, ylabel='Alumnos en riesgo')
+    base_ax(ax, titulo, ylabel=ylabel)
     colors = [C_DANGER if v > 0 else C_SUCCESS for v in vals]
     bars = ax.bar(nombres, vals, color=colors, edgecolor='white', linewidth=0.8, width=0.55)
     ax.set_ylim(0, max(vals) + 1.5 if vals else 5)
@@ -206,6 +945,7 @@ def grafica_riesgo_asignaturas(riesgo_dict, titulo='Alumnos en riesgo por asigna
     plt.xticks(rotation=28, ha='right')
     plt.tight_layout()
     return fig2b64(fig)
+
 
 def grafica_calor_asignaturas_parciales(asignaturas_resumen):
     """Heatmap-style chart: asignaturas × parciales."""
@@ -221,30 +961,16 @@ def grafica_calor_asignaturas_parciales(asignaturas_resumen):
     mat = np.array([[v if v is not None else np.nan for v in row] for row in data])
     fig, ax = plt.subplots(figsize=(6, max(2.5, len(ylabels) * 0.6)), facecolor=C_BG)
     base_ax(ax)
-    colors = [
-    (0.0, "#b91c1c"),
-    (0.55, "#fa5e0a"),
-    (0.6, "#f99a16fb"),   # la mitada del valor (medio transparente, puede que la barra no se vea de acuerdo al tono)
-    (0.69, "#e2fb24"),   
-    (0.7, "#b5f916"),    
-    (1.0, "#15803d")
+    from matplotlib.colors import LinearSegmentedColormap
+    _calor_colors = [
+        (0.0,  "#b91c1c"),
+        (0.55, "#fa5e0a"),
+        (0.60, "#f99a16"),
+        (0.69, "#e2fb24"),
+        (0.70, "#b5f916"),
+        (1.0,  "#15803d"),
     ]
-
-    cmap = LinearSegmentedColormap.from_list(
-    "custom_heat",
-    colors
-    )
-
-    cmap.set_bad(color='#f1f5f9')
-
-    im = ax.imshow(
-    mat,
-    cmap=cmap,
-    aspect='auto',
-    vmin=0,
-    vmax=10,
-    interpolation='nearest'
-    )
+    cmap = LinearSegmentedColormap.from_list("calor_custom", _calor_colors)
     cmap.set_bad(color='#f1f5f9')
     im = ax.imshow(mat, cmap=cmap, aspect='auto', vmin=0, vmax=10,
                    interpolation='nearest')
@@ -267,16 +993,18 @@ def grafica_calor_asignaturas_parciales(asignaturas_resumen):
     plt.tight_layout()
     return fig2b64(fig)
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Vistas
 # ─────────────────────────────────────────────────────────────────────────────
 
 def dashboard(request):
     semestres = Semestre.objects.all()
-    grupos = Grupo.objects.all()
-    total_alumnos = Alumno.objects.count()
-    total_calificaciones = Calificacion.objects.count()
-    califs = list(Calificacion.objects.all())
+    grupos = grupos_con_conteo_alumnos()
+    alumnos = alumnos_con_consentimiento()
+    total_alumnos = alumnos.count()
+    califs = list(Calificacion.objects.filter(alumno__in=alumnos))
+    total_calificaciones = len(califs)
     aprobados = sum(1 for c in califs if c.aprobado)
     reprobados = len(califs) - aprobados
     pct_ap = round(aprobados / len(califs) * 100, 1) if califs else 0
@@ -294,7 +1022,7 @@ def dashboard(request):
 def lista_alumnos(request):
     grupo_id = request.GET.get('grupo')
     grupos = Grupo.objects.select_related('semestre').all()
-    alumnos = Alumno.objects.select_related('grupo__semestre').all()
+    alumnos = alumnos_con_consentimiento().select_related('grupo__semestre')
     grupo_sel = None
     if grupo_id:
         grupo_sel = get_object_or_404(Grupo, id=grupo_id)
@@ -311,38 +1039,17 @@ def calificaciones_grupo(request):
 
     if grupo_id:
         grupo_sel = get_object_or_404(Grupo, id=grupo_id)
-        alumnos = Alumno.objects.filter(grupo=grupo_sel)
+        alumnos = alumnos_con_consentimiento().filter(grupo=grupo_sel)
         asignaturas = Asignatura.objects.filter(semestre=grupo_sel.semestre)
 
         for alumno in alumnos:
-            row = {
-                'alumno': alumno,
-                'calificaciones': {},
-                'promedio_general': 0
-            }
-
-            suma = 0
-            contador = 0
-
+            row = {'alumno': alumno, 'calificaciones': {}}
             for asig in asignaturas:
                 try:
-                    cal = Calificacion.objects.get(
-                        alumno=alumno,
-                        asignatura=asig,
-                        parcial=int(parcial)
-                    )
-
+                    cal = Calificacion.objects.get(alumno=alumno, asignatura=asig, parcial=int(parcial))
                     row['calificaciones'][asig.clave] = cal
-
-                    suma += cal.promedio
-                    contador += 1
-
                 except Calificacion.DoesNotExist:
                     row['calificaciones'][asig.clave] = None
-
-            if contador > 0:
-                row['promedio_general'] = round(suma / contador, 2)
-
             datos.append(row)
 
         # Una sola gráfica: barras de promedios por asignatura para este parcial
@@ -360,10 +1067,19 @@ def calificaciones_grupo(request):
                 f'Promedio por asignatura — Parcial {parcial}'
             )
 
+        # Calcular promedios por asignatura para la fila de totales
+        promedios_col = {}
+        for asig in asignaturas:
+            califs_asig = [r['calificaciones'].get(asig.clave) for r in datos if r['calificaciones'].get(asig.clave)]
+            if califs_asig:
+                promedios_col[asig.clave] = round(sum(c.promedio for c in califs_asig) / len(califs_asig), 2)
+            else:
+                promedios_col[asig.clave] = None
+
         context = {
             'grupos': grupos, 'grupo_sel': grupo_sel, 'asignaturas': asignaturas,
             'datos': datos, 'parcial': parcial, 'graficas': graficas,
-            'parciales': [1, 2, 3], 'minimo': MINIMO,
+            'parciales': [1, 2, 3], 'minimo': MINIMO, 'promedios_col': promedios_col,
         }
     else:
         context = {'grupos': grupos, 'parcial': parcial, 'parciales': [1, 2, 3], 'minimo': MINIMO}
@@ -380,9 +1096,11 @@ def indicadores(request):
 
     if grupo_id:
         grupo_sel = get_object_or_404(Grupo, id=grupo_id)
-        alumnos = list(Alumno.objects.filter(grupo=grupo_sel))
+        alumnos = list(alumnos_con_consentimiento().filter(grupo=grupo_sel))
         asignaturas = list(Asignatura.objects.filter(semestre=grupo_sel.semestre))
-        califs_all = list(Calificacion.objects.filter(alumno__grupo=grupo_sel).select_related('alumno', 'asignatura'))
+        califs_all = list(Calificacion.objects.filter(
+            alumno__in=alumnos,
+        ).select_related('alumno', 'asignatura'))
 
         califs_f = califs_all
         if asig_filtro:
@@ -419,28 +1137,13 @@ def indicadores(request):
                 cp = [c for c in cals if c.parcial == p]
                 if cp:
                     por_parcial[p] = round(sum(c.promedio for c in cp) / len(cp), 2)
-            promedio_final = None
-
-            if all(p in por_parcial for p in [1, 2, 3]):
-                promedio_final = round(
-                    (
-                        por_parcial[1] +
-                        por_parcial[2] +
-                        por_parcial[3]
-                    ) / 3,
-                    2
-                )
-
             asignaturas_resumen.append({
-                'asignatura': asig,
-                'total': len(set(c.alumno_id for c in cals)),
-                'aprobados': ap,
-                'reprobados': rep,
-                'promedio': prom,
+                'asignatura': asig, 'total': len(set(c.alumno_id for c in cals)),
+                'aprobados': ap, 'reprobados': rep, 'promedio': prom,
                 'pct_aprobacion': round(ap / len(cals) * 100, 1) if cals else 0,
                 'por_parcial': por_parcial,
-                'promedio_final': promedio_final,
             })
+
         # Gráfica 1: Pastel aprobación (solo si hay datos)
         if stats['total']:
             graficas['pastel'] = grafica_pastel_aprobacion(stats['aprobados'], stats['reprobados'])
@@ -474,214 +1177,63 @@ def indicadores(request):
     }
     return render(request, 'escolar/indicadores.html', context)
 
-def exportar_resumen_asignaturas(request):
-    grupo_id = request.GET.get('grupo')
-    parcial = request.GET.get('parcial')
 
-    if not grupo_id:
-        return redirect('dashboard')
-
-    grupo = get_object_or_404(Grupo, id=grupo_id)
-    asignaturas = Asignatura.objects.filter(semestre=grupo.semestre)
-
-    e = estilo_excel()
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = 'Resumen Asignaturas'
-
-    # ───────────────── HEADER ─────────────────
-
-    ws.merge_cells('A1:J1')
-
-    titulo = f'RESUMEN POR ASIGNATURA — {grupo.semestre.nombre} — Grupo {grupo.nombre}'
-
-    if parcial:
-        titulo += f' — Parcial {parcial}'
-
-    ws['A1'] = titulo
-
-    ws['A1'].font = Font(
-        bold=True,
-        color='FFFFFF',
-        size=12
-    )
-
-    ws['A1'].fill = e['title_fill']
-    ws['A1'].alignment = e['center']
-
-    headers = [
-        'Asignatura',
-        'Clave',
-        'Promedio',
-        'Aprobados',
-        'Reprobados',
-        '% Aprobación',
-        'P1',
-        'P2',
-        'P3',
-        'Final'
-    ]
-
-    for col, h in enumerate(headers, 1):
-        c = ws.cell(row=2, column=col, value=h)
-
-        c.font = e['header_font']
-        c.fill = e['header_fill']
-        c.alignment = e['center']
-        c.border = e['border']
-
-    widths = [35, 15, 12, 12, 12, 15, 10, 10, 10, 10]
-
-    for i, w in enumerate(widths, 1):
-        ws.column_dimensions[get_column_letter(i)].width = w
-
-    # ───────────────── DATOS ─────────────────
-
-    row_n = 3
-
-    for asig in asignaturas:
-
-        califs = Calificacion.objects.filter(
-            asignatura=asig,
-            alumno__grupo=grupo
-        )
-
-        if parcial:
-            califs = califs.filter(parcial=int(parcial))
-
-        total = califs.count()
-
-        promedio = round(
-            sum(c.promedio for c in califs) / total,
-            2
-        ) if total else 0
-
-        aprobados = len([
-        c for c in califs
-        if c.promedio >= MINIMO
-        ])
-
-        reprobados = total - aprobados
-
-        pct = round(
-            (aprobados / total) * 100,
-            2
-        ) if total else 0
-
-        por_parcial = {}
-
-        for p in [1, 2, 3]:
-
-            cp = Calificacion.objects.filter(
-                asignatura=asig,
-                alumno__grupo=grupo,
-                parcial=p
-            )
-
-            if cp.exists():
-                por_parcial[p] = round(
-                    sum(c.promedio for c in cp) / cp.count(),
-                    2
-                )
-            else:
-                por_parcial[p] = '—'
-
-        vals_final = [
-            v for v in por_parcial.values()
-            if isinstance(v, (int, float))
-        ]
-
-        promedio_final = round(
-            sum(vals_final) / len(vals_final),
-            2
-        ) if vals_final else '—'
-
-        fill_r = (
-            e['aprobado_fill']
-            if promedio >= MINIMO
-            else e['reprobado_fill']
-        )
-
-        row_data = [
-            asig.nombre,
-            asig.clave,
-            promedio,
-            aprobados,
-            reprobados,
-            pct,
-            por_parcial[1],
-            por_parcial[2],
-            por_parcial[3],
-            promedio_final
-        ]
-
-        for col, val in enumerate(row_data, 1):
-
-            c = ws.cell(
-                row=row_n,
-                column=col,
-                value=val
-            )
-
-            c.fill = fill_r
-            c.border = e['border']
-
-            c.alignment = (
-                e['center']
-                if col != 1
-                else Alignment(vertical='center')
-            )
-
-        row_n += 1
-
-    # ───────────────── RESPONSE ─────────────────
-
-    resp = HttpResponse(
-        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    )
-
-    resp['Content-Disposition'] = (
-        f'attachment; filename="resumen_asignaturas_G{grupo.nombre}.xlsx"'
-    )
-
-    wb.save(resp)
-
-    return resp
-
-#---------------
 def pronostico_ia(request):
     grupo_id = request.GET.get('grupo')
     grupos = Grupo.objects.select_related('semestre').all()
     resultado = []; grupo_sel = None; graficas = {}
     indices_asig = []; stats_grupo = {}
+    metricas_modelo = {'r2': None, 'mae': None, 'muestras': 0}
 
     if grupo_id:
         grupo_sel = get_object_or_404(Grupo, id=grupo_id)
-        alumnos = list(Alumno.objects.filter(grupo=grupo_sel).order_by('nombre_completo'))
+        alumnos = list(alumnos_con_consentimiento().filter(
+            grupo=grupo_sel,
+        ).order_by('nombre_completo'))
         asignaturas = list(Asignatura.objects.filter(semestre=grupo_sel.semestre))
-        califs_all = list(Calificacion.objects.filter(alumno__grupo=grupo_sel).select_related('alumno', 'asignatura'))
+        califs_all = list(Calificacion.objects.filter(
+            alumno__in=alumnos,
+        ).select_related('alumno', 'asignatura'))
+        promedios_por_asignatura = {}
+        for calificacion in califs_all:
+            clave = (calificacion.alumno_id, calificacion.asignatura_id)
+            promedios_por_asignatura.setdefault(clave, {})[
+                calificacion.parcial
+            ] = calificacion.promedio
+
+        metricas_modelo = metricas_grupo_pronostico(califs_all)
 
         for alumno in alumnos:
             datos_alumno = {'alumno': alumno, 'asignaturas': [], 'promedio_global': None}
             promedios_g = []
             for asig in asignaturas:
-                califs = [c for c in califs_all if c.alumno_id == alumno.id and c.asignatura_id == asig.id]
-                promedios = [c.promedio for c in sorted(califs, key=lambda x: x.parcial)]
-                if len(promedios) >= 2:
-                    x = np.array(range(1, len(promedios) + 1))
-                    coef = np.polyfit(x, np.array(promedios), 1)
-                    pron = round(max(0, min(10, float(np.polyval(coef, 3)))), 2)
-                    tendencia = 'sube' if coef[0] > 0.2 else ('baja' if coef[0] < -0.2 else 'estable')
-                elif len(promedios) == 1:
-                    pron = promedios[0]; tendencia = 'sin datos'
-                else:
-                    pron = None; tendencia = 'sin datos'
-                if pron is not None:
+                promedios_dict = promedios_por_asignatura.get((alumno.id, asig.id), {})
+                estimacion = explicar_pronostico(promedios_dict)
+                pron = estimacion['pronostico'] if estimacion else None
+                tendencia = estimacion['tendencia'] if estimacion else 'sin datos'
+                log_id = None
+                factores = []
+                if estimacion:
                     promedios_g.append(pron)
+                    log = registrar_pronostico(
+                        alumno,
+                        asig,
+                        estimacion,
+                        metricas_modelo,
+                    )
+                    log_id = log.pk
+                    factores = estimacion['factores']
                 datos_alumno['asignaturas'].append({
-                    'asignatura': asig, 'promedios': promedios, 'pronostico': pron,
-                    'tendencia': tendencia, 'riesgo': pron is not None and pron < MINIMO,
+                    'asignatura': asig,
+                    'promedios': [
+                        {'numero': parcial, 'valor': promedios_dict.get(parcial)}
+                        for parcial in (1, 2, 3)
+                    ],
+                    'pronostico': pron,
+                    'tendencia': tendencia,
+                    'riesgo': pron is not None and pron < MINIMO,
+                    'factores': factores,
+                    'pronostico_log_id': log_id,
                 })
             if promedios_g:
                 datos_alumno['promedio_global'] = round(sum(promedios_g) / len(promedios_g), 2)
@@ -691,7 +1243,7 @@ def pronostico_ia(request):
         stats_grupo = {
             'aprobados': sum(1 for p in pgs if p >= MINIMO),
             'reprobados': sum(1 for p in pgs if p < MINIMO),
-            'total': len(alumnos),
+            'total': len(pgs),
         }
         if stats_grupo['total']:
             stats_grupo['pct_aprobacion'] = round(stats_grupo['aprobados'] / stats_grupo['total'] * 100, 1)
@@ -714,7 +1266,11 @@ def pronostico_ia(request):
         # Gráfica 1: Pastel grupo (pronóstico)
         if stats_grupo.get('total'):
             graficas['pastel'] = grafica_pastel_aprobacion(
-                stats_grupo['aprobados'], stats_grupo['reprobados'], 'Pronóstico del grupo')
+                stats_grupo['aprobados'],
+                stats_grupo['reprobados'],
+                'Estimación del grupo',
+                etiquetas=('Sobre mínimo (estimado)', 'Bajo mínimo (estimado)'),
+            )
 
         # Gráfica 2: Alumnos en riesgo por asignatura
         riesgo = {
@@ -723,13 +1279,147 @@ def pronostico_ia(request):
             for asig in asignaturas
         }
         if any(v > 0 for v in riesgo.values()):
-            graficas['riesgo'] = grafica_riesgo_asignaturas(riesgo)
+            graficas['riesgo'] = grafica_riesgo_asignaturas(
+                riesgo,
+                titulo='Estimaciones bajo mínimo por asignatura',
+                ylabel='Estimaciones bajo mínimo',
+            )
 
     context = {
         'grupos': grupos, 'grupo_sel': grupo_sel, 'resultado': resultado, 'graficas': graficas,
         'indices_asig': indices_asig, 'stats_grupo': stats_grupo, 'minimo': MINIMO,
+        'metricas_modelo': metricas_modelo, 'version_modelo': VERSION_MODELO,
     }
     return render(request, 'escolar/pronostico.html', context)
+
+
+def solicitar_revision_pronostico(request):
+    errores = []
+    pronostico_id = (
+        request.POST.get('pronostico')
+        if request.method == 'POST'
+        else request.GET.get('pronostico')
+    )
+    pronostico_indicado = bool(pronostico_id)
+    data = {
+        'numero_cuenta': request.POST.get('numero_cuenta', '').strip(),
+        'solicitante': request.POST.get('solicitante', '').strip(),
+        'parentesco': request.POST.get('parentesco', ''),
+        'contacto_email': request.POST.get('contacto_email', '').strip(),
+        'motivo': request.POST.get('motivo', '').strip(),
+    }
+    log = None
+    if pronostico_id:
+        log = PronosticoLog.objects.filter(
+            pk=pronostico_id,
+            alumno__in=alumnos_con_consentimiento(),
+        ).select_related('alumno', 'asignatura').first()
+
+    if request.method == 'GET' and pronostico_indicado and log is None:
+        errores.append('No fue posible validar el pronóstico. Vuelve a solicitar el enlace desde coordinación.')
+
+    if request.method == 'POST':
+        if not data['numero_cuenta'] or len(data['numero_cuenta']) > 20:
+            errores.append('Indica un número de cuenta válido.')
+        if not data['solicitante'] or len(data['solicitante']) > 150:
+            errores.append('Indica tu nombre (máximo 150 caracteres).')
+        if data['parentesco'] not in dict(SolicitudRevisionPronostico.PARENTESCO_CHOICES):
+            errores.append('Selecciona tu relación con el alumno.')
+        if not data['contacto_email']:
+            errores.append('Indica un correo de contacto.')
+        else:
+            try:
+                validate_email(data['contacto_email'])
+            except ValidationError:
+                errores.append('El correo de contacto no tiene un formato válido.')
+        if not data['motivo'] or len(data['motivo']) > 4000:
+            errores.append('Describe brevemente la revisión solicitada (máximo 4000 caracteres).')
+        if request.POST.get('confirmacion') != 'on':
+            errores.append('Confirma que la información es correcta.')
+
+        if not errores and not pronostico_indicado:
+            alumno = alumnos_con_consentimiento().filter(
+                numero_cuenta=data['numero_cuenta'],
+            ).first()
+            if alumno:
+                log = PronosticoLog.objects.filter(alumno=alumno).select_related(
+                    'alumno', 'asignatura',
+                ).first()
+        if not errores and (
+            log is None or log.alumno.numero_cuenta != data['numero_cuenta']
+        ):
+            errores.append('No fue posible validar el pronóstico con esos datos.')
+        if not errores:
+            solicitud = SolicitudRevisionPronostico.objects.create(
+                alumno=log.alumno,
+                pronostico=log,
+                solicitante=data['solicitante'],
+                parentesco=data['parentesco'],
+                contacto_email=data['contacto_email'],
+                motivo=data['motivo'],
+            )
+            SolicitudRevisionPronosticoEvento.objects.create(
+                solicitud=solicitud,
+                accion='solicitud_recibida',
+                detalle='Solicitud de revisión humana recibida.',
+            )
+            return render(request, 'escolar/solicitud_revision_pronostico.html', {
+                'success_folio': solicitud.pk,
+            })
+
+    return render(request, 'escolar/solicitud_revision_pronostico.html', {
+        'errores': errores,
+        'form_data': data,
+        'pronostico_id': pronostico_id,
+        'parentesco_choices': SolicitudRevisionPronostico.PARENTESCO_CHOICES,
+    })
+
+
+def coordinacion_pronosticos(request):
+    if not request.user.is_staff:
+        return HttpResponseForbidden('Solo coordinación puede gestionar revisiones de pronóstico.')
+
+    if request.method == 'POST':
+        solicitud = get_object_or_404(
+            SolicitudRevisionPronostico,
+            pk=request.POST.get('solicitud'),
+        )
+        estado = request.POST.get('estado', '')
+        respuesta = request.POST.get('respuesta', '').strip()
+        if estado not in dict(SolicitudRevisionPronostico.ESTADO_CHOICES):
+            messages.error(request, 'Selecciona un estado válido.')
+        elif estado == 'atendida' and not respuesta:
+            messages.error(request, 'Registra una respuesta antes de cerrar la revisión.')
+        else:
+            solicitud.estado = estado
+            solicitud.responsable = request.user
+            solicitud.respuesta = respuesta
+            solicitud.save(update_fields=[
+                'estado', 'responsable', 'respuesta', 'fecha_actualizacion',
+            ])
+            SolicitudRevisionPronosticoEvento.objects.create(
+                solicitud=solicitud,
+                actor=request.user,
+                accion='actualizar_revision',
+                detalle=f'Estado actualizado a {solicitud.get_estado_display()}.',
+            )
+            messages.success(request, 'Seguimiento de revisión actualizado.')
+        return redirect(f"{reverse('coordinacion_pronosticos')}?solicitud={solicitud.pk}")
+
+    solicitudes = SolicitudRevisionPronostico.objects.select_related(
+        'alumno', 'pronostico__asignatura', 'responsable',
+    )
+    seleccionada = None
+    if request.GET.get('solicitud'):
+        seleccionada = get_object_or_404(
+            solicitudes,
+            pk=request.GET['solicitud'],
+        )
+    return render(request, 'escolar/coordinacion_pronosticos.html', {
+        'solicitudes': solicitudes,
+        'seleccionada': seleccionada,
+        'estado_choices': SolicitudRevisionPronostico.ESTADO_CHOICES,
+    })
 
 
 # ── Exportar Excel ─────────────────────────────────────────────────────────────
@@ -741,7 +1431,7 @@ def exportar_excel(request):
         messages.error(request, 'Selecciona un grupo')
         return redirect('lista_alumnos')
     grupo = get_object_or_404(Grupo, id=grupo_id)
-    alumnos = Alumno.objects.filter(grupo=grupo).order_by('nombre_completo')
+    alumnos = alumnos_con_consentimiento().filter(grupo=grupo).order_by('nombre_completo')
     asignaturas = Asignatura.objects.filter(semestre=grupo.semestre)
     e = estilo_excel()
     wb = openpyxl.Workbook(); wb.remove(wb.active)
@@ -808,51 +1498,216 @@ def exportar_pronostico_excel(request):
     if not grupo_id:
         return redirect('pronostico')
     grupo = get_object_or_404(Grupo, id=grupo_id)
-    alumnos = list(Alumno.objects.filter(grupo=grupo).order_by('nombre_completo'))
+    alumnos = list(alumnos_con_consentimiento().filter(grupo=grupo).order_by('nombre_completo'))
     asignaturas = list(Asignatura.objects.filter(semestre=grupo.semestre))
-    califs_all = list(Calificacion.objects.filter(alumno__grupo=grupo).select_related('alumno', 'asignatura'))
+    califs_all = list(Calificacion.objects.filter(
+        alumno__in=alumnos,
+    ).select_related('alumno', 'asignatura'))
     e = estilo_excel()
     wb = openpyxl.Workbook(); wb.remove(wb.active)
     ws = wb.create_sheet('Pronóstico General')
-    ws.merge_cells('A1:G1')
+    ws.merge_cells('A1:H1')
     ws['A1'] = f'PRONÓSTICO IA — {grupo.semestre.nombre} — Grupo {grupo.nombre}  (Mín. aprobatorio: {MINIMO:.0f})'
     ws['A1'].font = Font(bold=True, color='FFFFFF', size=12)
     ws['A1'].fill = e['title_fill']; ws['A1'].alignment = e['center']
     ws.row_dimensions[1].height = 26
-    for col, h in enumerate(['Alumno', 'No. Cuenta', 'P1', 'P2', 'P3', 'Pronóstico P3 (IA)', 'Tendencia'], 1):
-        c = ws.cell(row=2, column=col, value=h)
+    metricas = metricas_grupo_pronostico(califs_all)
+    ws.merge_cells('A2:H2')
+    ws['A2'] = (
+        'Estimación orientativa; requiere revisión humana. No modifica el estatus académico. '
+        f"R²: {metricas['r2'] if metricas['r2'] is not None else 'N/D'} · "
+        f"MAE: {metricas['mae'] if metricas['mae'] is not None else 'N/D'} · "
+        f"Muestras: {metricas['muestras']} · Modelo: {VERSION_MODELO}"
+    )
+    ws['A2'].alignment = Alignment(wrap_text=True)
+    for col, h in enumerate([
+        'Alumno', 'No. Cuenta', 'P1', 'P2', 'P3 observado',
+        'Estimación P3', 'Tendencia', 'Factores (coef. × valor)',
+    ], 1):
+        c = ws.cell(row=3, column=col, value=h)
         c.font = e['header_font']; c.fill = e['header_fill']
         c.alignment = e['center']; c.border = e['border']
-    for i, w in enumerate([35, 15, 10, 10, 10, 18, 14], 1):
+    for i, w in enumerate([35, 15, 10, 10, 14, 16, 14, 52], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
-    row_n = 3; ap_g = 0; rep_g = 0
+    row_n = 4; ap_g = 0; rep_g = 0
     for alumno in alumnos:
         cal_al = [c for c in califs_all if c.alumno_id == alumno.id]
-        pp = {p: round(sum(c.promedio for c in cal_al if c.parcial == p) / len([c for c in cal_al if c.parcial == p]), 2)
-              for p in [1, 2, 3] if [c for c in cal_al if c.parcial == p]}
-        vals = list(pp.values())
-        if len(vals) >= 2:
-            coef = np.polyfit(range(1, len(vals)+1), vals, 1)
-            pron = round(max(0, min(10, float(np.polyval(coef, 3)))), 2)
-            tend = 'Sube' if coef[0] > 0.2 else ('Baja' if coef[0] < -0.2 else 'Estable')
-        elif len(vals) == 1:
-            pron = vals[0]; tend = 'Sin datos'
-        else:
-            pron = None; tend = '—'
+        pp = {
+            parcial: round(
+                sum(c.promedio for c in cal_al if c.parcial == parcial)
+                / len([c for c in cal_al if c.parcial == parcial]),
+                2,
+            )
+            for parcial in (1, 2, 3)
+            if any(c.parcial == parcial for c in cal_al)
+        }
+        estimacion = explicar_pronostico(pp)
+        pron = estimacion['pronostico'] if estimacion else None
+        tend = estimacion['tendencia'] if estimacion else 'Sin datos'
+        factores = '; '.join(
+            f"{factor['variable']}: {factor['coeficiente']} × {factor['valor']} = {factor['contribucion']}"
+            for factor in estimacion['factores']
+        ) if estimacion else 'Sin P1 y P2'
         if pron is not None and pron >= MINIMO: ap_g += 1
         elif pron is not None: rep_g += 1
         fill_r = e['aprobado_fill'] if (pron and pron >= MINIMO) else e['reprobado_fill']
         for col, val in enumerate([alumno.nombre_completo, alumno.numero_cuenta,
                                     pp.get(1,'N/A'), pp.get(2,'N/A'), pp.get(3,'N/A'),
-                                    pron if pron else '—', tend], 1):
+                                    pron if pron is not None else '—', tend, factores], 1):
             c = ws.cell(row=row_n, column=col, value=val)
             c.fill = fill_r; c.border = e['border']; c.alignment = e['center']
         row_n += 1
     row_n += 1
-    ws.cell(row=row_n, column=1, value=f'Aprobados (pronóstico): {ap_g}  |  Reprobados: {rep_g}  |  % Aprobación: {round(ap_g/len(alumnos)*100,1) if alumnos else 0}%').font = Font(bold=True, size=10)
+    total_estimaciones = ap_g + rep_g
+    ws.cell(row=row_n, column=1, value=f'Estimaciones sobre mínimo: {ap_g}  |  Estimaciones bajo mínimo: {rep_g}  |  Porcentaje estimado: {round(ap_g/total_estimaciones*100,1) if total_estimaciones else 0}%').font = Font(bold=True, size=10)
 
     resp = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     resp['Content-Disposition'] = f'attachment; filename="pronostico_IA_{grupo.semestre.nombre.replace(" ","_")}_G{grupo.nombre}.xlsx"'
+    wb.save(resp)
+    return resp
+
+
+# ── Exportar Resumen por Asignatura (Indicadores) ────────────────────────────
+
+def exportar_resumen_indicadores(request):
+    grupo_id = request.GET.get('grupo')
+    parcial_filtro = request.GET.get('parcial', '')
+    if not grupo_id:
+        return redirect('indicadores')
+    grupo = get_object_or_404(Grupo, id=grupo_id)
+    asignaturas = list(Asignatura.objects.filter(semestre=grupo.semestre))
+    califs_all = list(Calificacion.objects.filter(
+        alumno__in=alumnos_con_consentimiento().filter(grupo=grupo),
+    ).select_related('alumno', 'asignatura'))
+
+    asignaturas_resumen = []
+    for asig in asignaturas:
+        cals = [c for c in califs_all if c.asignatura_id == asig.id]
+        if parcial_filtro:
+            cals = [c for c in cals if str(c.parcial) == parcial_filtro]
+        if not cals:
+            continue
+        ap = sum(1 for c in cals if c.aprobado)
+        rep = len(cals) - ap
+        prom = round(sum(c.promedio for c in cals) / len(cals), 2)
+        por_parcial = {}
+        for p in [1, 2, 3]:
+            cp = [c for c in cals if c.parcial == p]
+            if cp:
+                por_parcial[p] = round(sum(c.promedio for c in cp) / len(cp), 2)
+        asignaturas_resumen.append({
+            'asignatura': asig, 'total': len(set(c.alumno_id for c in cals)),
+            'aprobados': ap, 'reprobados': rep, 'promedio': prom,
+            'pct_aprobacion': round(ap / len(cals) * 100, 1) if cals else 0,
+            'por_parcial': por_parcial,
+        })
+
+    e = estilo_excel()
+    wb = openpyxl.Workbook(); wb.remove(wb.active)
+    ws = wb.create_sheet('Resumen Asignaturas')
+    titulo = f'RESUMEN POR ASIGNATURA — {grupo.semestre.nombre} — Grupo {grupo.nombre}'
+    if parcial_filtro:
+        titulo += f' — Parcial {parcial_filtro}'
+    ws.merge_cells('A1:I1')
+    ws['A1'] = titulo
+    ws['A1'].font = Font(bold=True, color='FFFFFF', size=12)
+    ws['A1'].fill = e['title_fill']; ws['A1'].alignment = e['center']
+    ws.row_dimensions[1].height = 26
+    headers = ['Asignatura', 'Clave', 'Promedio', 'Aprobados', 'Reprobados', '% Aprobación', 'P1', 'P2', 'P3']
+    for col, h in enumerate(headers, 1):
+        c = ws.cell(row=2, column=col, value=h)
+        c.font = e['header_font']; c.fill = e['header_fill']
+        c.alignment = e['center']; c.border = e['border']
+    for i, w in enumerate([35, 12, 12, 12, 12, 16, 10, 10, 10], 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    for row_n, item in enumerate(asignaturas_resumen, 3):
+        fill_r = e['aprobado_fill'] if item['promedio'] >= MINIMO else e['reprobado_fill']
+        vals = [
+            item['asignatura'].nombre, item['asignatura'].clave, item['promedio'],
+            item['aprobados'], item['reprobados'], f"{item['pct_aprobacion']}%",
+            item['por_parcial'].get(1, '—'), item['por_parcial'].get(2, '—'), item['por_parcial'].get(3, '—'),
+        ]
+        for col, val in enumerate(vals, 1):
+            c = ws.cell(row=row_n, column=col, value=val)
+            c.fill = fill_r; c.border = e['border']; c.alignment = e['center']
+
+    resp = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    resp['Content-Disposition'] = f'attachment; filename="resumen_indicadores_{grupo.semestre.nombre.replace(" ","_")}_G{grupo.nombre}.xlsx"'
+    wb.save(resp)
+    return resp
+
+
+# ── Exportar Índice por Asignatura (Pronóstico) ───────────────────────────────
+
+def exportar_indices_pronostico(request):
+    grupo_id = request.GET.get('grupo')
+    if not grupo_id:
+        return redirect('pronostico')
+    grupo = get_object_or_404(Grupo, id=grupo_id)
+    alumnos = list(alumnos_con_consentimiento().filter(grupo=grupo).order_by('nombre_completo'))
+    asignaturas = list(Asignatura.objects.filter(semestre=grupo.semestre))
+    califs_all = list(Calificacion.objects.filter(
+        alumno__in=alumnos,
+    ).select_related('alumno', 'asignatura'))
+    metricas = metricas_grupo_pronostico(califs_all)
+
+    indices_asig = []
+    for asig in asignaturas:
+        prons = []
+        for alumno in alumnos:
+            califs = [c for c in califs_all if c.alumno_id == alumno.id and c.asignatura_id == asig.id]
+            promedios = {c.parcial: c.promedio for c in califs}
+            estimacion = explicar_pronostico(promedios)
+            pron = estimacion['pronostico'] if estimacion else None
+            if pron is not None:
+                registrar_pronostico(alumno, asig, estimacion, metricas)
+                prons.append(pron)
+        ap = sum(1 for p in prons if p >= MINIMO)
+        rep = len(prons) - ap
+        indices_asig.append({
+            'asignatura': asig, 'aprobados': ap, 'reprobados': rep, 'total': len(prons),
+            'pct_aprobacion': round(ap / len(prons) * 100, 1) if prons else 0,
+            'promedio': round(sum(prons) / len(prons), 2) if prons else 0,
+        })
+
+    e = estilo_excel()
+    wb = openpyxl.Workbook(); wb.remove(wb.active)
+    ws = wb.create_sheet('Índice Pronóstico')
+    ws.merge_cells('A1:F1')
+    ws['A1'] = f'ÍNDICE POR ASIGNATURA (PRONÓSTICO IA) — {grupo.semestre.nombre} — Grupo {grupo.nombre}'
+    ws['A1'].font = Font(bold=True, color='FFFFFF', size=12)
+    ws['A1'].fill = e['title_fill']; ws['A1'].alignment = e['center']
+    ws.row_dimensions[1].height = 26
+    ws.merge_cells('A2:F2')
+    ws['A2'] = (
+        'Estimación orientativa; requiere revisión humana. No modifica el estatus académico. '
+        f"R²: {metricas['r2'] if metricas['r2'] is not None else 'N/D'} · "
+        f"MAE: {metricas['mae'] if metricas['mae'] is not None else 'N/D'} · "
+        f"Muestras: {metricas['muestras']} · Modelo: {VERSION_MODELO}"
+    )
+    ws['A2'].alignment = Alignment(wrap_text=True)
+    headers = [
+        'Asignatura', 'Clave', 'Promedio esperado',
+        'Sobre mínimo (estimado)', 'Bajo mínimo (estimado)', '% sobre mínimo',
+    ]
+    for col, h in enumerate(headers, 1):
+        c = ws.cell(row=3, column=col, value=h)
+        c.font = e['header_font']; c.fill = e['header_fill']
+        c.alignment = e['center']; c.border = e['border']
+    for i, w in enumerate([35, 12, 18, 12, 12, 16], 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    for row_n, item in enumerate(indices_asig, 4):
+        fill_r = e['aprobado_fill'] if item['promedio'] >= MINIMO else e['reprobado_fill']
+        vals = [
+            item['asignatura'].nombre, item['asignatura'].clave, item['promedio'],
+            item['aprobados'], item['reprobados'], f"{item['pct_aprobacion']}%",
+        ]
+        for col, val in enumerate(vals, 1):
+            c = ws.cell(row=row_n, column=col, value=val)
+            c.fill = fill_r; c.border = e['border']; c.alignment = e['center']
+
+    resp = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    resp['Content-Disposition'] = f'attachment; filename="indices_pronostico_{grupo.semestre.nombre.replace(" ","_")}_G{grupo.nombre}.xlsx"'
     wb.save(resp)
     return resp
 
@@ -868,7 +1723,7 @@ def exportar_asignatura(request):
     asig = get_object_or_404(Asignatura, id=asig_id)
     e = estilo_excel()
     wb = openpyxl.Workbook(); wb.remove(wb.active)
-    alumnos_qs = Alumno.objects.filter(grupo__semestre=asig.semestre)
+    alumnos_qs = alumnos_con_consentimiento().filter(grupo__semestre=asig.semestre)
     if grupo_id:
         alumnos_qs = alumnos_qs.filter(grupo_id=grupo_id)
     alumnos = list(alumnos_qs.order_by('nombre_completo'))
@@ -950,7 +1805,7 @@ def captura_rapida(request):
         asignaturas = list(Asignatura.objects.filter(semestre=grupo_sel.semestre))
         if asig_id:
             asig_sel = get_object_or_404(Asignatura, id=asig_id)
-            for al in Alumno.objects.filter(grupo=grupo_sel).order_by('nombre_completo'):
+            for al in alumnos_con_consentimiento().filter(grupo=grupo_sel).order_by('nombre_completo'):
                 try:
                     al.cal_existente = Calificacion.objects.get(alumno=al, asignatura=asig_sel, parcial=int(parcial))
                 except Calificacion.DoesNotExist:
@@ -964,90 +1819,58 @@ def captura_rapida(request):
         'alumno_ids_json': alumno_ids_json, 'minimo': MINIMO,
     })
 
-def exportar_calificaciones_excel(request):
-    grupo_id = request.GET.get('grupo')
-    asig_id = request.GET.get('asignatura')
-    parcial = request.GET.get('parcial')
-
-    if not all([grupo_id, asig_id, parcial]):
-        messages.error(request, 'Faltan parámetros para exportar.')
-        return redirect('captura_rapida')
-
-    grupo = get_object_or_404(Grupo, id=grupo_id)
-    asignatura = get_object_or_404(Asignatura, id=asig_id)
-
-    e = estilo_excel()
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = f"Parcial {parcial}"
-
-    # Título
-    ws.merge_cells('A1:F1')
-    ws['A1'] = f'{asignatura.nombre} ({asignatura.clave}) — {grupo.semestre.nombre} — Grupo {grupo.nombre} — Parcial {parcial}'
-    ws['A1'].font = Font(bold=True, color='FFFFFF', size=12)
-    ws['A1'].fill = e['title_fill']
-    ws['A1'].alignment = e['center']
-    ws.row_dimensions[1].height = 26
-
-    # Encabezados
-    for col, h in enumerate(['No. Cuenta', 'Nombre Completo', 'Hetero', 'Co-eval', 'Auto-eval', 'Promedio'], 1):
-        c = ws.cell(row=2, column=col, value=h)
-        c.font = e['header_font']
-        c.fill = e['header_fill']
-        c.alignment = e['center']
-        c.border = e['border']
-
-    for i, w in enumerate([15, 40, 12, 12, 12, 12], 1):
-        ws.column_dimensions[get_column_letter(i)].width = w
-
-    # Filas de alumnos
-    alumnos = Alumno.objects.filter(grupo=grupo).order_by('nombre_completo')
-    for idx, alumno in enumerate(alumnos, 3):
-        cal = Calificacion.objects.filter(
-            alumno=alumno,
-            asignatura=asignatura,
-            parcial=parcial
-        ).first()
-        fill_r = e['aprobado_fill'] if (cal and cal.aprobado) else (e['reprobado_fill'] if cal else e['warn_fill'])
-        for col, val in enumerate([
-            alumno.numero_cuenta,
-            alumno.nombre_completo,
-            float(cal.heteroevaluacion) if cal else 'N/A',
-            float(cal.coevaluacion) if cal else 'N/A',
-            float(cal.autoevaluacion) if cal else 'N/A',
-            cal.promedio if cal else 'N/A',
-        ], 1):
-            c = ws.cell(row=idx, column=col, value=val)
-            c.fill = fill_r
-            c.border = e['border']
-            c.alignment = e['center'] if col != 2 else Alignment(vertical='center')
-
-    nombre_archivo = f"Calificaciones_{grupo.nombre}_{asignatura.clave}_P{parcial}.xlsx"
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = f'attachment; filename="{nombre_archivo}"'
-    wb.save(response)
-    return response
 
 def guardar_calificaciones(request):
     if request.method != 'POST':
-        return JsonResponse({'ok': False, 'error': 'Método no permitido'})
+        return JsonResponse({'ok': False, 'error': 'Método no permitido'}, status=405)
     try:
         data = _json.loads(request.body)
+        filas = data.get('rows', [])
+        calificaciones = []
+        for index, row in enumerate(filas, 1):
+            try:
+                calificaciones.append({
+                    'alumno_id': row['alumno_id'],
+                    'heteroevaluacion': validar_calificacion(row['hetero']),
+                    'coevaluacion': validar_calificacion(row['co']),
+                    'autoevaluacion': validar_calificacion(row['auto']),
+                })
+            except (KeyError, TypeError, ValueError) as exc:
+                return JsonResponse({
+                    'ok': False,
+                    'error': f'Fila {index}: {exc}',
+                }, status=400)
+
         asig = get_object_or_404(Asignatura, id=data['asignatura_id'])
         parcial = int(data['parcial'])
+        alumnos = []
+        for fila in calificaciones:
+            alumno = get_object_or_404(
+                alumnos_con_consentimiento(),
+                id=fila['alumno_id'],
+            )
+            alumnos.append((alumno, fila))
+
         creados = actualizados = 0
-        for row in data.get('rows', []):
-            alumno = get_object_or_404(Alumno, id=row['alumno_id'])
-            h, c, a = float(row['hetero']), float(row['co']), float(row['auto'])
-            if not (0 <= h <= 10 and 0 <= c <= 10 and 0 <= a <= 10):
-                continue
+        for alumno, fila in alumnos:
             _, created = Calificacion.objects.update_or_create(
                 alumno=alumno, asignatura=asig, parcial=parcial,
-                defaults={'heteroevaluacion': h, 'coevaluacion': c, 'autoevaluacion': a}
+                defaults={
+                    'heteroevaluacion': fila['heteroevaluacion'],
+                    'coevaluacion': fila['coevaluacion'],
+                    'autoevaluacion': fila['autoevaluacion'],
+                }
             )
             if created: creados += 1
             else: actualizados += 1
         return JsonResponse({'ok': True, 'creados': creados, 'actualizados': actualizados})
+    except (ValueError, TypeError, KeyError) as ex:
+        return JsonResponse({'ok': False, 'error': f'Datos de calificación inválidos: {ex}'}, status=400)
+    except Http404:
+        return JsonResponse(
+            {'ok': False, 'error': 'El alumno no tiene consentimiento vigente.'},
+            status=403,
+        )
     except Exception as ex:
         return JsonResponse({'ok': False, 'error': str(ex)})
 
@@ -1059,7 +1882,7 @@ def seguimiento(request):
     grupos = Grupo.objects.select_related('semestre').all()
     grupo_id = request.GET.get('grupo')
     grupo_sel = None
-    alumnos = list(Alumno.objects.select_related('grupo').prefetch_related('notas', 'calificaciones').all())
+    alumnos = list(alumnos_con_consentimiento().select_related('grupo').prefetch_related('notas', 'calificaciones'))
     if grupo_id:
         grupo_sel = get_object_or_404(Grupo, id=grupo_id)
         alumnos = [a for a in alumnos if a.grupo_id == int(grupo_id)]
@@ -1072,7 +1895,7 @@ def seguimiento(request):
 
 def seguimiento_notas_api(request):
     from .models import Nota
-    alumno = get_object_or_404(Alumno, id=request.GET.get('alumno_id'))
+    alumno = get_object_or_404(alumnos_con_consentimiento(), id=request.GET.get('alumno_id'))
     cals = list(alumno.calificaciones.all())
     prom = round(sum(c.promedio for c in cals) / len(cals), 2) if cals else None
     notas = list(Nota.objects.filter(alumno=alumno).values('tipo', 'texto', 'fecha'))
@@ -1086,7 +1909,7 @@ def agregar_nota_api(request):
     if request.method != 'POST':
         return JsonResponse({'ok': False})
     data = _json.loads(request.body)
-    alumno = get_object_or_404(Alumno, id=data['alumno_id'])
+    alumno = get_object_or_404(alumnos_con_consentimiento(), id=data['alumno_id'])
     Nota.objects.create(alumno=alumno, tipo=data.get('tipo', 'observacion'), texto=data.get('texto', ''))
     return JsonResponse({'ok': True})
 
@@ -1100,9 +1923,19 @@ def profesor_panel(request):
         ('Selecciona grupo, asignatura y parcial', 'El sistema sabe a qué registro corresponde'),
         ('Haz clic en Importar', 'Los alumnos y calificaciones se crean automáticamente'),
     ]
+    semestres = Semestre.objects.annotate(
+        alumnos_con_consentimiento=Count(
+            'grupos__alumnos',
+            filter=Q(
+                grupos__alumnos__consentimientos__estado=Consentimiento.ESTADO_VIGENTE,
+                grupos__alumnos__consentimientos__version_aviso=PRIVACY_NOTICE_VERSION,
+            ) if consentimiento_requerido() else Q(),
+            distinct=True,
+        ),
+    )
     return render(request, 'escolar/profesor.html', {
-        'semestres': Semestre.objects.all(),
-        'grupos': Grupo.objects.select_related('semestre').all(),
+        'semestres': semestres,
+        'grupos': grupos_con_conteo_alumnos(),
         'asignaturas': Asignatura.objects.select_related('semestre').all(),
         'pasos_flujo': pasos_flujo,
         'minimo': MINIMO,
@@ -1179,13 +2012,22 @@ def importar_excel(request):
             try:
                 nc = str(row[0]).strip()
                 nombre = str(row[1]).strip() if row[1] else ''
-                h, c, a = float(row[2]), float(row[3]), float(row[4])
-                if not (0 <= h <= 10 and 0 <= c <= 10 and 0 <= a <= 10):
-                    errores.append(f'Fila {row_idx}: calificaciones fuera de rango'); continue
+                try:
+                    h, c, a = (
+                        validar_calificacion(row[2]),
+                        validar_calificacion(row[3]),
+                        validar_calificacion(row[4]),
+                    )
+                except ValueError as ex:
+                    errores.append(f'Fila {row_idx}: {ex}')
+                    continue
                 alumno, al_c = Alumno.objects.get_or_create(
                     numero_cuenta=nc,
                     defaults={'nombre_completo': nombre, 'email': f'{nc}@ithi.edu.mx', 'grupo': grupo}
                 )
+                if consentimiento_requerido() and not alumnos_con_consentimiento().filter(pk=alumno.pk).exists():
+                    errores.append(f'Fila {row_idx}: se registró el alumno, pero falta consentimiento vigente.')
+                    continue
                 _, cal_c = Calificacion.objects.update_or_create(
                     alumno=alumno, asignatura=asig, parcial=int(parcial),
                     defaults={'heteroevaluacion': h, 'coevaluacion': c, 'autoevaluacion': a}
@@ -1203,3 +2045,64 @@ def importar_excel(request):
     except Exception as ex:
         messages.error(request, f'Error al leer el archivo: {ex}')
     return redirect('profesor')
+
+
+# ── Agente IA (Ollama) ────────────────────────────────────────────────────────
+
+def agente_ia(request):
+    from django.conf import settings
+    return render(request, 'escolar/agente.html', {
+        'grupos': Grupo.objects.select_related('semestre').all(),
+        'modelo': settings.OLLAMA_MODEL,
+    })
+
+
+def agente_estado_api(request):
+    from . import ollama_client
+    return JsonResponse(ollama_client.estado())
+
+
+def agente_alumnos_api(request):
+    alumnos = alumnos_con_consentimiento().filter(
+        grupo_id=request.GET.get('grupo_id'),
+    ).order_by('nombre_completo')
+    return JsonResponse({'alumnos': [{'id': a.id, 'nombre': a.nombre_completo} for a in alumnos]})
+
+
+def agente_chat_api(request):
+    from django.http import StreamingHttpResponse
+    from . import agente
+    from .ollama_client import OllamaError
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'Método no permitido'}, status=405)
+    try:
+        data = _json.loads(request.body)
+    except ValueError:
+        return JsonResponse({'ok': False, 'error': 'JSON inválido'}, status=400)
+    historial = data.get('mensajes') or []
+    if not historial:
+        return JsonResponse({'ok': False, 'error': 'Sin mensajes'}, status=400)
+    alumno_id = data.get('alumno_id') or None
+    if alumno_id:
+        try:
+            alumno_id = int(alumno_id)
+        except (TypeError, ValueError):
+            return JsonResponse({'ok': False, 'error': 'Identificador de alumno inválido'}, status=400)
+        if not alumnos_con_consentimiento().filter(pk=alumno_id).exists():
+            return JsonResponse(
+                {'ok': False, 'error': 'El alumno no tiene consentimiento vigente.'},
+                status=403,
+            )
+
+    def stream():
+        try:
+            for trozo in agente.responder_stream(historial, data.get('grupo_id') or None,
+                                                 alumno_id):
+                yield trozo
+        except OllamaError as e:
+            yield f"\n\n⚠️ {e}"
+
+    resp = StreamingHttpResponse(stream(), content_type='text/plain; charset=utf-8')
+    resp['Cache-Control'] = 'no-cache'
+    resp['X-Accel-Buffering'] = 'no'
+    return resp

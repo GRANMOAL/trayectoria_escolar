@@ -119,180 +119,43 @@ document.getElementById('grupo-sel').addEventListener('change', function() {
 </div>
 {% endif %}
 
-
 <!-- Tabla resumen asignaturas -->
 {% if asignaturas_resumen %}
 <div class="card">
-  <div class="section-title">
-    Resumen por asignatura
-    {% if parcial_filtro %} — Parcial {{ parcial_filtro }}{% endif %}
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+    <div class="section-title" style="margin-bottom:0;">Resumen por asignatura{% if parcial_filtro %} — Parcial {{ parcial_filtro }}{% endif %}</div>
+    <a href="{% url 'exportar_resumen_indicadores' %}?grupo={{ grupo_sel.id }}{% if parcial_filtro %}&parcial={{ parcial_filtro }}{% endif %}" class="btn btn-success btn-sm">↓ Exportar Excel</a>
   </div>
-
   <div class="table-wrap">
-    <a href="{% url 'exportar_resumen_asignaturas' %}?grupo={{ grupo_sel.id }}{% if parcial_filtro %}&parcial={{ parcial_filtro }}{% endif %}"
-      class="btn btn-success">
-      ↓ Exportar Resumen Excel
-    </a>
     <table>
       <thead>
-        <tr>
-          <th>Asignatura</th>
-          <th>Clave</th>
-          <th>Promedio</th>
-          <th>Aprobados</th>
-          <th>Reprobados</th>
-          <th>% Aprobación</th>
-          <th>P1</th>
-          <th>P2</th>
-          <th>P3</th>
-          <th>Final</th>
-        </tr>
+        <tr><th>Asignatura</th><th>Clave</th><th>Promedio</th><th>Aprobados</th><th>Reprobados</th><th>% Aprobación</th><th>P1</th><th>P2</th><th>P3</th></tr>
       </thead>
-
       <tbody>
         {% for item in asignaturas_resumen %}
         <tr>
-
-          <td style="font-weight:600;">
-            {{ item.asignatura.nombre }}
-          </td>
-
-          <td>
-            <span class="badge badge-primary">
-              {{ item.asignatura.clave }}
-            </span>
-          </td>
-
-          <td>
-            <span class="score {% if item.promedio >= minimo %}score-high{% elif item.promedio >= 5 %}score-med{% else %}score-low{% endif %}">
-              {{ item.promedio }}
-            </span>
-          </td>
-
-          <td>
-            <span class="badge badge-success">
-              {{ item.aprobados }}
-            </span>
-          </td>
-
-          <td>
-            <span class="badge badge-danger">
-              {{ item.reprobados }}
-            </span>
-          </td>
-
+          <td style="font-weight:600;">{{ item.asignatura.nombre }}</td>
+          <td><span class="badge badge-primary">{{ item.asignatura.clave }}</span></td>
+          <td><span class="score {% if item.promedio >= minimo %}score-high{% elif item.promedio >= 5 %}score-med{% else %}score-low{% endif %}">{{ item.promedio }}</span></td>
+          <td><span class="badge badge-success">{{ item.aprobados }}</span></td>
+          <td><span class="badge badge-danger">{{ item.reprobados }}</span></td>
           <td>
             <div style="display:flex;align-items:center;gap:8px;">
               <div style="flex:1;background:var(--border-light);border-radius:100px;height:6px;overflow:hidden;">
-                <div
-                  style="
-                    height:100%;
-                    border-radius:100px;
-                    width:{{ item.pct_aprobacion }}%;
-                    background:{% if item.pct_aprobacion >= 60 %}var(--success){% else %}var(--danger){% endif %};
-                    transition:width 1s ease;
-                  ">
-                </div>
+                <div style="height:100%;border-radius:100px;width:{{ item.pct_aprobacion }}%;background:{% if item.pct_aprobacion >= 60 %}var(--success){% else %}var(--danger){% endif %};transition:width 1s ease;"></div>
               </div>
-
-              <span style="font-size:12px;font-weight:700;">
-                {{ item.pct_aprobacion }}%
-              </span>
+              <span style="font-size:12px;font-weight:700;">{{ item.pct_aprobacion }}%</span>
             </div>
           </td>
-
-          <!-- P1 -->
-          <td style="
-            text-align:center;
-            font-size:13px;
-            font-weight:700;
-            color:
-            {% if item.por_parcial.1 %}
-              {% if item.por_parcial.1 >= minimo %}
-                var(--success)
-              {% else %}
-                var(--danger)
-              {% endif %}
-            {% else %}
-              var(--text-light)
-            {% endif %};
-          ">
-            {% if item.por_parcial.1 %}
-              {{ item.por_parcial.1 }}
-            {% else %}
-              —
-            {% endif %}
+          <td style="text-align:center;font-size:13px;font-weight:700;color:{% if item.por_parcial.1 %}{% if item.por_parcial.1 >= minimo %}var(--success){% else %}var(--danger){% endif %}{% else %}var(--text-light){% endif %};">
+            {% if item.por_parcial.1 %}{{ item.por_parcial.1 }}{% else %}—{% endif %}
           </td>
-
-          <!-- P2 -->
-          <td style="
-            text-align:center;
-            font-size:13px;
-            font-weight:700;
-            color:
-            {% if item.por_parcial.2 %}
-              {% if item.por_parcial.2 >= minimo %}
-                var(--success)
-              {% else %}
-                var(--danger)
-              {% endif %}
-            {% else %}
-              var(--text-light)
-            {% endif %};
-          ">
-            {% if item.por_parcial.2 %}
-              {{ item.por_parcial.2 }}
-            {% else %}
-              —
-            {% endif %}
+          <td style="text-align:center;font-size:13px;font-weight:700;color:{% if item.por_parcial.2 %}{% if item.por_parcial.2 >= minimo %}var(--success){% else %}var(--danger){% endif %}{% else %}var(--text-light){% endif %};">
+            {% if item.por_parcial.2 %}{{ item.por_parcial.2 }}{% else %}—{% endif %}
           </td>
-
-          <!-- P3 -->
-          <td style="
-            text-align:center;
-            font-size:13px;
-            font-weight:700;
-            color:
-            {% if item.por_parcial.3 %}
-              {% if item.por_parcial.3 >= minimo %}
-                var(--success)
-              {% else %}
-                var(--danger)
-              {% endif %}
-            {% else %}
-              var(--text-light)
-            {% endif %};
-          ">
-            {% if item.por_parcial.3 %}
-              {{ item.por_parcial.3 }}
-            {% else %}
-              —
-            {% endif %}
+          <td style="text-align:center;font-size:13px;font-weight:700;color:{% if item.por_parcial.3 %}{% if item.por_parcial.3 >= minimo %}var(--success){% else %}var(--danger){% endif %}{% else %}var(--text-light){% endif %};">
+            {% if item.por_parcial.3 %}{{ item.por_parcial.3 }}{% else %}—{% endif %}
           </td>
-
-          <!-- FINAL -->
-          <td style="
-            text-align:center;
-            font-size:13px;
-            font-weight:700;
-            color:
-            {% if item.promedio_final %}
-              {% if item.promedio_final >= minimo %}
-                var(--success)
-              {% else %}
-                var(--danger)
-              {% endif %}
-            {% else %}
-              var(--text-light)
-            {% endif %};
-          ">
-            {% if item.promedio_final %}
-              {{ item.promedio_final }}
-            {% else %}
-              —
-            {% endif %}
-          </td>
-
         </tr>
         {% endfor %}
       </tbody>

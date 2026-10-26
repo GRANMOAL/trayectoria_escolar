@@ -1,0 +1,195 @@
+{% extends 'escolar/base.html' %}
+{% block title %}Coordinación ARCO{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-header-text">
+    <h2>Coordinación de solicitudes ARCO</h2>
+    <p>Verifica identidad, controla plazos y registra cada trámite.</p>
+  </div>
+  <a href="{% url 'solicitud_arco' %}" class="btn btn-secondary">Formulario público</a>
+</div>
+
+<div class="card arco-deadline-note">
+  El plazo de respuesta se calcula al recibir la solicitud: {{ arco_response_days }} días naturales.
+  Confirma este valor con los plazos legales e institucionales aplicables antes de operar.
+</div>
+
+<div class="card">
+  <div class="section-title">Solicitudes recibidas</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Folio</th><th>Tipo</th><th>Solicitante / titular</th><th>Estado</th><th>Límite</th><th>Responsable</th></tr></thead>
+      <tbody>
+        {% for solicitud in solicitudes %}
+        <tr>
+          <td><a href="{% url 'coordinacion_arco' %}?solicitud={{ solicitud.id }}">ARCO-{{ solicitud.id }}</a></td>
+          <td>{{ solicitud.get_tipo_display }}</td>
+          <td>
+            {{ solicitud.solicitante|default:"Datos anonimizados" }}<br>
+            <span class="text-muted">{{ solicitud.titular_nombre|default:"Titular anonimizado" }}</span>
+          </td>
+          <td>{{ solicitud.get_estado_display }}</td>
+          <td class="{% if solicitud.fecha_limite < hoy and solicitud.estado != 'atendida' and solicitud.estado != 'improcedente' %}arco-overdue{% endif %}">
+            {{ solicitud.fecha_limite|date:"d/m/Y" }}
+            {% if solicitud.fecha_limite < hoy and solicitud.estado != 'atendida' and solicitud.estado != 'improcedente' %}<br><strong>Vencida</strong>{% endif %}
+          </td>
+          <td>{{ solicitud.responsable|default:"Sin asignar" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6">No hay solicitudes recibidas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if seleccionada %}
+<div class="card arco-case">
+  <div class="section-title">Expediente ARCO-{{ seleccionada.id }} · {{ seleccionada.get_tipo_display }}</div>
+  <dl class="arco-details">
+    <dt>Fecha recibida</dt><dd>{{ seleccionada.fecha_solicitud|date:"d/m/Y H:i" }}</dd>
+    <dt>Plazo de respuesta</dt><dd>{{ seleccionada.fecha_limite|date:"d/m/Y" }}</dd>
+    <dt>Solicitante</dt><dd>{{ seleccionada.solicitante|default:"Anonimizado" }} · {{ seleccionada.parentesco }}</dd>
+    <dt>Contacto</dt><dd>{{ seleccionada.contacto_email|default:"Anonimizado" }}</dd>
+    <dt>Titular indicado</dt><dd>{{ seleccionada.titular_nombre|default:"Anonimizado" }} · {{ seleccionada.numero_cuenta|default:"" }}</dd>
+    <dt>Descripción</dt><dd>{{ seleccionada.descripcion|default:"Anonimizada" }}</dd>
+    <dt>Identidad</dt><dd>{% if seleccionada.identidad_verificada %}Verificada{% else %}Pendiente{% endif %}</dd>
+  </dl>
+
+  {% if not seleccionada.identidad_verificada and seleccionada.titular %}
+  <form method="post" class="arco-action-form">
+    {% csrf_token %}
+    <input type="hidden" name="solicitud" value="{{ seleccionada.id }}">
+    <input type="hidden" name="accion" value="verificar_identidad">
+    <input type="hidden" name="titular" value="{{ seleccionada.titular.id }}">
+    <label class="privacy-consent-label">
+      <input type="checkbox" name="confirmacion_identidad" required>
+      Confirmo que cotejé la documentación de identidad y que el titular seleccionado corresponde a la solicitud.
+    </label>
+    <button class="btn btn-primary" type="submit">Verificar identidad y vincular</button>
+  </form>
+  {% elif not seleccionada.identidad_verificada %}
+  <form method="post" class="arco-action-form">
+    {% csrf_token %}
+    <input type="hidden" name="solicitud" value="{{ seleccionada.id }}">
+    <input type="hidden" name="accion" value="verificar_identidad">
+    <div class="form-group">
+      <label for="arco-titular">Vincular titular</label>
+      <select id="arco-titular" name="titular" required>
+        <option value="">Seleccionar después de cotejar identidad</option>
+        {% for alumno in titulares %}
+        <option value="{{ alumno.id }}">{{ alumno.numero_cuenta }} · {{ alumno.nombre_completo }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <label class="privacy-consent-label">
+      <input type="checkbox" name="confirmacion_identidad" required>
+      Confirmo que cotejé documentación de identidad y que el titular seleccionado corresponde a la solicitud.
+    </label>
+    <button class="btn btn-primary" type="submit">Verificar identidad y vincular</button>
+  </form>
+  {% endif %}
+
+  <form method="post" class="arco-action-form">
+    {% csrf_token %}
+    <input type="hidden" name="solicitud" value="{{ seleccionada.id }}">
+    <input type="hidden" name="accion" value="actualizar_solicitud">
+    <div class="form-group">
+      <label for="arco-estado">Estado</label>
+      <select id="arco-estado" name="estado">
+        {% for value, label in estado_choices %}
+        <option value="{{ value }}" {% if seleccionada.estado == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="arco-respuesta">Respuesta o motivo de improcedencia</label>
+      <textarea id="arco-respuesta" name="respuesta" rows="3">{{ seleccionada.respuesta }}</textarea>
+    </div>
+    <button class="btn btn-secondary" type="submit">Guardar estado y respuesta</button>
+  </form>
+
+  {% if seleccionada.identidad_verificada and seleccionada.titular and not seleccionada.titular.suprimido_arco %}
+  <section class="arco-actions">
+    {% if seleccionada.tipo == 'acceso' %}
+    <h3>Acceso y exportación de datos</h3>
+    <div class="arco-action-buttons">
+      {% for action, label in export_actions %}
+      <form method="post">
+        {% csrf_token %}<input type="hidden" name="solicitud" value="{{ seleccionada.id }}">
+        <input type="hidden" name="accion" value="{{ action }}">
+        <button class="btn btn-primary" type="submit">{{ label }}</button>
+      </form>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if seleccionada.tipo == 'rectificacion' %}
+    <h3>Rectificar un dato del titular</h3>
+    <form method="post" class="arco-action-form">
+      {% csrf_token %}<input type="hidden" name="solicitud" value="{{ seleccionada.id }}">
+      <input type="hidden" name="accion" value="rectificar">
+      <div class="form-group">
+        <label for="arco-campo">Campo</label>
+        <select id="arco-campo" name="campo" required>
+          {% for value, label in campo_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="arco-valor">Valor corregido</label>
+        <input id="arco-valor" name="valor" maxlength="254" required>
+      </div>
+      <label class="privacy-consent-label">
+        <input type="checkbox" name="confirmacion" required>
+        Confirmo que la identidad está verificada y que este cambio corresponde a la solicitud.
+      </label>
+      <button class="btn btn-primary" type="submit">Aplicar rectificación</button>
+    </form>
+    {% endif %}
+
+    {% if seleccionada.tipo == 'cancelacion' or seleccionada.tipo == 'oposicion' %}
+    <h3>Bloqueo de tratamiento</h3>
+    <form method="post" class="arco-action-form arco-confirm-form">
+      {% csrf_token %}<input type="hidden" name="solicitud" value="{{ seleccionada.id }}">
+      <input type="hidden" name="accion" value="{% if seleccionada.tipo == 'oposicion' %}oposicion{% else %}bloquear{% endif %}">
+      <label for="arco-bloqueo">Escribe BLOQUEAR para confirmar</label>
+      <input id="arco-bloqueo" name="confirmacion" pattern="BLOQUEAR" required>
+      <button class="btn btn-secondary" type="submit">Bloquear acceso a los datos</button>
+    </form>
+    {% endif %}
+
+    {% if seleccionada.tipo == 'cancelacion' %}
+    <h3>Supresión por anonimización</h3>
+    <p>Se eliminarán las calificaciones y notas de seguimiento; se anonimizarán los datos identificadores y se conservarán el folio y la bitácora sin identificadores.</p>
+    <form method="post" class="arco-action-form arco-confirm-form">
+      {% csrf_token %}<input type="hidden" name="solicitud" value="{{ seleccionada.id }}">
+      <input type="hidden" name="accion" value="suprimir">
+      <label for="arco-supresion">Escribe SUPRIMIR para confirmar</label>
+      <input id="arco-supresion" name="confirmacion" pattern="SUPRIMIR" required>
+      <button class="btn btn-danger" type="submit">Suprimir y anonimizar titular</button>
+    </form>
+    {% endif %}
+
+    {% if seleccionada.titular.bloqueado_arco %}
+    <form method="post" class="arco-action-form arco-confirm-form">
+      {% csrf_token %}<input type="hidden" name="solicitud" value="{{ seleccionada.id }}">
+      <input type="hidden" name="accion" value="desbloquear">
+      <label for="arco-desbloqueo">Escribe DESBLOQUEAR para confirmar</label>
+      <input id="arco-desbloqueo" name="confirmacion" pattern="DESBLOQUEAR" required>
+      <button class="btn btn-secondary" type="submit">Retirar bloqueo</button>
+    </form>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <section class="arco-events">
+    <h3>Bitácora de actuaciones</h3>
+    <ul>
+      {% for evento in seleccionada.eventos.all %}
+      <li>{{ evento.fecha_hora|date:"d/m/Y H:i" }} · {{ evento.get_accion_display|default:evento.accion }} · {{ evento.actor|default:"Sistema" }} · {{ evento.detalle }}</li>
+      {% empty %}<li>Sin actuaciones registradas.</li>{% endfor %}
+    </ul>
+  </section>
+</div>
+{% endif %}
+{% endblock %}

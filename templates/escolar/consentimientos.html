@@ -1,0 +1,106 @@
+{% extends 'escolar/base.html' %}
+{% block title %}Consentimientos de alumnos{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-header-text">
+    <h2>Consentimientos de alumnos</h2>
+    <p>Registra y administra el consentimiento de madre, padre o tutor legal.</p>
+  </div>
+  <a href="{% url 'aviso_privacidad' %}" class="btn btn-secondary">Ver aviso de privacidad</a>
+</div>
+
+{% if consent_required %}
+<div class="card consent-config-notice">
+  El bloqueo de datos está activado. Solo se mostrarán en los módulos académicos los alumnos
+  con consentimiento vigente para la versión {{ notice_version }}.
+</div>
+{% else %}
+<div class="card consent-config-notice">
+  El bloqueo de datos está desactivado por configuración. Los consentimientos siguen registrándose
+  y pueden revocarse desde esta página.
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Alumno</th><th>Grupo</th><th>Consentimiento</th><th>Acción</th></tr>
+      </thead>
+      <tbody>
+        {% for item in filas %}
+        <tr>
+          <td>
+            <strong>{{ item.alumno.nombre_completo }}</strong><br>
+            <span class="text-muted">{{ item.alumno.numero_cuenta }}</span>
+          </td>
+          <td>{{ item.alumno.grupo|default:"Sin grupo" }}</td>
+          <td>
+            {% if item.consentimiento %}
+              <span class="badge {% if item.vigente %}badge-success{% else %}badge-amber{% endif %}">
+                {% if item.vigente %}Vigente{% elif item.consentimiento.estado == 'revocado' %}Revocado{% else %}Requiere actualización{% endif %}
+              </span><br>
+              <span class="text-muted">
+                {{ item.consentimiento.get_parentesco_display }} · {{ item.consentimiento.tutor_nombre }} ·
+                v{{ item.consentimiento.version_aviso }} · {{ item.consentimiento.fecha_hora|date:"d/m/Y H:i" }}
+              </span>
+              {% if item.consentimiento.revocado_en %}
+              <br><span class="text-muted">Revocado: {{ item.consentimiento.revocado_en|date:"d/m/Y H:i" }}</span>
+              {% endif %}
+            {% else %}
+              <span class="text-muted">Sin registro</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if item.vigente %}
+            <form method="post" action="{% url 'revocar_consentimiento' item.consentimiento.id %}">
+              {% csrf_token %}
+              <button class="btn btn-secondary btn-sm" type="submit">Revocar</button>
+            </form>
+            {% else %}
+            <details>
+              <summary class="btn btn-primary btn-sm">Registrar consentimiento</summary>
+              <form method="post" class="consent-form">
+                {% csrf_token %}
+                <input type="hidden" name="alumno" value="{{ item.alumno.id }}">
+                <div class="form-group">
+                  <label for="tutor-{{ item.alumno.id }}">Nombre de madre, padre o tutor</label>
+                  <input id="tutor-{{ item.alumno.id }}" name="tutor_nombre" maxlength="150" required>
+                </div>
+                <div class="form-group">
+                  <label for="parentesco-{{ item.alumno.id }}">Relación con el alumno</label>
+                  <select id="parentesco-{{ item.alumno.id }}" name="parentesco" required>
+                    <option value="">Seleccionar</option>
+                    {% for value, label in parentesco_choices %}
+                    <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="medio-{{ item.alumno.id }}">Medio de obtención</label>
+                  <select id="medio-{{ item.alumno.id }}" name="medio" required>
+                    <option value="">Seleccionar</option>
+                    {% for value, label in medio_choices %}
+                    <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <label class="privacy-consent-label">
+                  <input type="checkbox" name="aceptacion" required>
+                  Confirmo que la persona tutora, madre o padre leyó el aviso versión {{ notice_version }}
+                  y otorgó consentimiento para tratar los datos del alumno.
+                </label>
+                <button class="btn btn-primary" type="submit">Guardar consentimiento</button>
+              </form>
+            </details>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4">No hay alumnos registrados.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

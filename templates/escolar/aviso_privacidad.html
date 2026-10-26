@@ -1,0 +1,141 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aviso de privacidad · Trayectoria Escolar</title>
+  <link rel="stylesheet" href="{% static 'css/estilos.css' %}">
+</head>
+<body class="privacy-page">
+  <main class="privacy-card">
+    <p class="text-muted">Sistema de Trayectoria Escolar</p>
+    <h1>Aviso de privacidad</h1>
+    <p>Versión {{ notice_version }} · Vigente desde {{ notice_date }}.</p>
+
+    <div class="privacy-alert">
+      Este aviso es una base informativa para el proyecto. Antes de usar el sistema con datos reales,
+      la institución responsable debe completar sus datos de identificación y contacto, y revisar
+      este texto conforme a sus obligaciones legales y políticas internas.
+    </div>
+
+    <nav class="privacy-sections" aria-label="Secciones del aviso">
+      <a href="#simplificado">Aviso simplificado</a>
+      <a href="#integral">Aviso integral</a>
+    </nav>
+
+    <section id="simplificado">
+      <h2>Aviso de privacidad simplificado</h2>
+      <p>
+        La institución educativa que opera Trayectoria Escolar es responsable del tratamiento.
+        Debe completar su nombre, domicilio y canal de contacto institucional antes de usar el sistema
+        con datos reales.
+      </p>
+      <p>
+        Se pueden tratar datos de identificación escolar y contacto, grupo, asignaturas, evaluaciones,
+        calificaciones, pronósticos académicos y notas de seguimiento. Se usan para administrar la
+        trayectoria escolar, consultar y evaluar avances, generar indicadores y reportes, y apoyar el
+        seguimiento académico.
+      </p>
+      <p>
+        Si se utiliza el asistente de inteligencia artificial, se pueden enviar al servicio Ollama
+        configurado los mensajes y datos académicos seleccionados. La institución debe verificar ese
+        servicio antes de habilitarlo con información real.
+      </p>
+      <p>
+        Para solicitar información, corregir datos o ejercer los derechos aplicables, contacta al
+        responsable mediante el canal institucional que debe publicarse aquí: <strong>datos por completar por la institución</strong>.
+        También puedes <a href="{% url 'solicitud_arco' %}">presentar una solicitud ARCO</a>.
+        El aviso integral, con más información sobre el tratamiento, se encuentra a continuación.
+      </p>
+    </section>
+
+    <section id="integral">
+    <h2>Aviso de privacidad integral</h2>
+    <h3>Responsable del tratamiento</h3>
+    <p>
+      El responsable del tratamiento es la institución educativa que opera este sistema.
+      Debe identificarse aquí con su nombre o razón social y domicilio, así como proporcionar
+      un medio de contacto institucional para consultas sobre datos personales: <strong>datos por completar por la institución</strong>.
+    </p>
+
+    <h3>Datos que puede tratar el sistema</h3>
+    <ul>
+      <li>Datos de identificación escolar: nombre, número de cuenta, correo electrónico y grupo.</li>
+      <li>Datos académicos: asignaturas, evaluaciones, calificaciones, promedios y pronósticos académicos.</li>
+      <li>Notas de seguimiento registradas por el personal autorizado.</li>
+      <li>Datos técnicos necesarios para el acceso, como el nombre de usuario y la sesión.</li>
+    </ul>
+
+    <h3>Finalidades</h3>
+    <p>
+      Los datos se utilizan para organizar grupos y asignaturas, capturar y consultar calificaciones,
+      dar seguimiento a la trayectoria escolar, generar indicadores y reportes, y apoyar la detección
+      temprana de necesidades académicas. Los pronósticos son orientativos y no sustituyen la valoración
+      del personal educativo.
+    </p>
+
+    <h3>Asistente de inteligencia artificial</h3>
+    <p>
+      Si una persona usuaria utiliza el asistente, el sistema puede enviar al servicio Ollama configurado
+      los mensajes del chat y el contexto académico seleccionado. Ese contexto puede incluir nombres,
+      números de cuenta, calificaciones y notas de seguimiento. La institución debe verificar y autorizar
+      el servidor configurado antes de habilitar esta función con información real; no debe asumirse que
+      el servicio es local si su dirección apunta a otro equipo o proveedor.
+    </p>
+
+    <h3>Conservación, acceso y seguridad</h3>
+    <p>
+      El personal con una cuenta autorizada puede acceder a la información según los permisos que le
+      haya asignado la institución. Esta aplicación no define por sí sola un plazo de conservación ni
+      una política institucional de eliminación: ambos deben establecerse y aplicarse por el responsable.
+      Las medidas técnicas y administrativas adicionales también deben ser definidas por la institución
+      para el entorno donde se instale el sistema.
+    </p>
+
+    <h3>Consultas y ejercicio de derechos</h3>
+    <p>
+      Para solicitar información sobre el tratamiento de datos, actualizar datos o ejercer los derechos
+      que correspondan, contacta al responsable institucional mediante los datos de contacto que se
+      publiquen en este aviso. También puedes <a href="{% url 'solicitud_arco' %}">presentar una solicitud ARCO</a>;
+      coordinación verificará la identidad antes de entregar información o realizar cambios. La institución
+      debe completar ese canal y validar los plazos legales aplicables antes de poner el sistema en uso.
+    </p>
+
+    <h3>Cambios a este aviso</h3>
+    <p>
+      La institución responsable debe publicar aquí cualquier actualización y su fecha de vigencia.
+      Este aviso es accesible sin iniciar sesión.
+    </p>
+    </section>
+
+    {% if acceptance_required %}
+    <section class="privacy-signature" aria-labelledby="privacy-signature-title">
+      <h2 id="privacy-signature-title">Confirmación de lectura y aceptación</h2>
+      <p>
+        Esta aceptación corresponde a tu cuenta de acceso y quedará registrada con tu usuario,
+        la versión del aviso y la fecha y hora del sistema. No sustituye el consentimiento del alumno
+        o de su madre, padre o tutor legal. Si no aceptas, se cerrará tu sesión.
+      </p>
+      <form method="post" action="{% url 'privacy_acceptance' %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.GET.next }}">
+        <label class="privacy-consent-label">
+          <input type="checkbox" name="aceptacion" required>
+          Confirmo que leí y acepto el aviso de privacidad, versión {{ notice_version }}.
+        </label>
+        <div class="privacy-consent-actions">
+          <button type="submit" name="decision" value="aceptar" class="btn btn-primary">Aceptar y entrar</button>
+          <button type="submit" name="decision" value="rechazar" class="btn btn-secondary" formnovalidate>Rechazar y cerrar sesión</button>
+        </div>
+      </form>
+    </section>
+    {% else %}
+    <a class="privacy-back" href="{% url 'login' %}">Volver al inicio de sesión</a>
+    {% endif %}
+  </main>
+  <footer class="privacy-footer">
+    <a href="{% url 'aviso_privacidad' %}">Aviso de privacidad</a> · Trayectoria Escolar
+  </footer>
+</body>
+</html>

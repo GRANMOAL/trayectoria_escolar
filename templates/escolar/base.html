@@ -157,6 +157,13 @@
       </span>
       <span class="nav-label">Pronóstico IA</span>
     </a>
+
+    <a href="{% url 'agente_ia' %}" class="nav-item {% if request.resolver_match.url_name == 'agente_ia' %}active{% endif %}">
+      <span class="nav-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="12" rx="3"/><path d="M12 8V4"/><circle cx="12" cy="3" r="1"/><circle cx="8.5" cy="14" r="1"/><circle cx="15.5" cy="14" r="1"/></svg>
+      </span>
+      <span class="nav-label">Agente IA</span>
+    </a>
   </div>
 
   <div class="nav-divider"></div>
@@ -185,6 +192,20 @@
       </span>
       <span class="nav-label">Panel del Tutor</span>
     </a>
+    <a href="{% url 'gestionar_consentimientos' %}" class="nav-item {% if request.resolver_match.url_name == 'gestionar_consentimientos' %}active{% endif %}">
+      <span class="nav-icon" aria-hidden="true">✓</span>
+      <span class="nav-label">Consentimientos</span>
+    </a>
+    {% if request.user.is_staff %}
+    <a href="{% url 'coordinacion_arco' %}" class="nav-item {% if request.resolver_match.url_name == 'coordinacion_arco' %}active{% endif %}">
+      <span class="nav-icon" aria-hidden="true">AR</span>
+      <span class="nav-label">Coordinación ARCO</span>
+    </a>
+    <a href="{% url 'coordinacion_pronosticos' %}" class="nav-item {% if request.resolver_match.url_name == 'coordinacion_pronosticos' %}active{% endif %}">
+      <span class="nav-icon" aria-hidden="true">IA</span>
+      <span class="nav-label">Revisión humana IA</span>
+    </a>
+    {% endif %}
   </div>
 
   <!-- Footer -->
@@ -196,6 +217,12 @@
       </svg>
       Exportar Excel
     </a>
+    <div class="minimo-badge">Sesión: <strong style="color:rgba(255,255,255,.75);">{{ request.user.get_username }}</strong></div>
+    <form method="post" action="{% url 'logout' %}">
+      {% csrf_token %}
+      <button type="submit" class="btn-logout">Cerrar sesión</button>
+    </form>
+    <a class="privacy-sidebar-link" href="{% url 'aviso_privacidad' %}">Aviso de privacidad</a>
     <div class="minimo-badge">Min. aprobatorio: <strong style="color:rgba(255,255,255,.6);">7.0</strong></div>
   </div>
 </nav>
@@ -218,6 +245,11 @@
   {% endif %}
   {% block content %}{% endblock %}
 </main>
+
+<footer class="main-footer">
+  Sistema de Trayectoria Escolar · <a href="{% url 'aviso_privacidad' %}">Aviso de privacidad</a>
+  · <a href="{% url 'solicitud_arco' %}">Ejercer derechos ARCO</a>
+</footer>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
