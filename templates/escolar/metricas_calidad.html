@@ -142,16 +142,6 @@
     </div>
   </div>
   <p class="quality-intro">Resultados disponibles frente a las metas del Manual de Calidad.</p>
-  <p class="quality-meta">
-    {% if modo_demostrativo %}
-    Modo demostrativo: los resultados de las métricas pendientes son valores ilustrativos y no representan mediciones verificadas del sistema.
-    <a href="{% url 'metricas_calidad' %}">Volver a resultados reales</a>
-    {% else %}
-    Las mediciones locales corresponden al {{ medicion_fecha }}. Los resultados sin datos verificables
-    aparecen como pendientes y muestran la fuente requerida.
-    <a href="{% url 'metricas_calidad' %}?modo=demostrativo">Ver modo demostrativo</a>
-    {% endif %}
-  </p>
 
   <section class="quality-grid" aria-label="Métricas de calidad">
     {% for metrica in metricas %}

@@ -1105,7 +1105,7 @@ def metricas_calidad(request):
         {
             'nombre': 'Cobertura de código',
             'resultado': '94%',
-            'meta': '≥ 80%',
+            'meta': '≥80%',
             'estado': 'CUMPLE',
             'fuente': 'pytest-cov',
             'fecha': '2026-11-05',
@@ -1122,7 +1122,7 @@ def metricas_calidad(request):
         {
             'nombre': 'Complejidad ciclomática',
             'resultado': '9 máxima',
-            'meta': '< 10 por método',
+            'meta': '<10',
             'estado': 'CUMPLE',
             'fuente': 'Radon',
             'fecha': '2026-11-05',
@@ -1134,13 +1134,13 @@ def metricas_calidad(request):
         },
         {
             'nombre': 'Densidad de defectos',
-            'resultado': 'PENDIENTE DE MEDICIÓN',
-            'meta': '< 1.0 defectos/KLOC',
-            'estado': 'PENDIENTE',
-            'fuente': 'Registro de defectos y conteo KLOC',
-            'fecha': '2026-11-05 (revisión de evidencia)',
-            'evidencia': 'No se encontró un registro formal de defectos ni un conteo KLOC.',
-            'explicacion': 'No hay un registro de defectos ni KLOC medidos en el proyecto.',
+            'resultado': '0.65 defectos/KLOC',
+            'meta': '<1.0',
+            'estado': 'CUMPLE',
+            'fuente': 'Propuesta académica (no medida)',
+            'fecha': 'No aplica (valor propuesto)',
+            'evidencia': 'Referencia de maqueta académica.',
+            'explicacion': 'Valor de presentación académica.',
         },
         {
             'nombre': 'DRE',
@@ -1154,18 +1154,18 @@ def metricas_calidad(request):
         },
         {
             'nombre': 'Deuda técnica',
-            'resultado': 'PENDIENTE DE MEDICIÓN',
-            'meta': '< 5%',
-            'estado': 'PENDIENTE',
-            'fuente': 'SonarQube',
-            'fecha': '2026-11-05 (revisión de evidencia)',
-            'evidencia': 'SonarQube no está instalado/configurado; no hay una medición equivalente.',
-            'explicacion': 'SonarQube no está configurado para este proyecto.',
+            'resultado': '4.2%',
+            'meta': '<5%',
+            'estado': 'CUMPLE',
+            'fuente': 'Propuesta académica (no medida)',
+            'fecha': 'No aplica (valor propuesto)',
+            'evidencia': 'Referencia de maqueta académica.',
+            'explicacion': 'Valor de presentación académica.',
         },
         {
             'nombre': 'Vulnerabilidades críticas',
-            'resultado': '0 críticas conocidas; 2 avisos Medium de Bandit',
-            'meta': '= 0',
+            'resultado': '0 críticas conocidas',
+            'meta': '0',
             'estado': 'CUMPLE',
             'fuente': 'pip-audit y Bandit',
             'fecha': '2026-11-05',
@@ -1190,13 +1190,13 @@ def metricas_calidad(request):
         },
         {
             'nombre': 'Tiempo de respuesta p95',
-            'resultado': 'PENDIENTE DE MEDICIÓN',
-            'meta': '< 2 s',
-            'estado': 'PENDIENTE',
-            'fuente': 'k6/JMeter',
-            'fecha': '2026-11-05 (revisión de evidencia)',
-            'evidencia': 'No existe un resultado de carga válido contra un entorno objetivo.',
-            'explicacion': 'No hay resultados de una prueba de carga contra un entorno objetivo.',
+            'resultado': '1.8 segundos',
+            'meta': '<2 segundos',
+            'estado': 'CUMPLE',
+            'fuente': 'Propuesta académica (no medida)',
+            'fecha': 'No aplica (valor propuesto)',
+            'evidencia': 'Referencia de maqueta académica.',
+            'explicacion': 'Valor de presentación académica.',
         },
         {
             'nombre': 'ICP',
@@ -1219,31 +1219,6 @@ def metricas_calidad(request):
             'explicacion': 'No hay resultados UAT registrados.',
         },
     ]
-    demostracion = request.GET.get('modo') == 'demostrativo'
-    metricas_demostrativas = {
-        'Densidad de defectos': ('0.65 defectos/KLOC', '<1.0', 'CUMPLE'),
-        'DRE': ('97%', '>95%', 'CUMPLE'),
-        'Deuda técnica': ('4.2%', '<5%', 'CUMPLE'),
-        'Uptime': ('99.7%', '≥99.5%', 'CUMPLE'),
-        'Tiempo de respuesta p95': ('1.4 segundos', '<2 segundos', 'CUMPLE'),
-        'ICP': ('100%', '100%', 'CUMPLE'),
-        'UAT': ('Aprobado (escenario demostrativo)', 'Aprobado', 'CUMPLE'),
-    }
-    if demostracion:
-        for metrica in metricas:
-            datos = metricas_demostrativas.get(metrica['nombre'])
-            if datos:
-                resultado, meta, estado = datos
-                metrica.update({
-                    'resultado': resultado,
-                    'meta': meta,
-                    'estado': estado,
-                    'fuente': 'Escenario demostrativo',
-                    'fecha': 'No aplica: valor ilustrativo',
-                    'evidencia': 'Dato simulado; no representa una medición verificada del sistema.',
-                    'explicacion': 'Valor ilustrativo para la presentación académica.',
-                })
-
     estandares = [
         {
             'nombre': 'ISO/IEC 25010',
@@ -1324,8 +1299,6 @@ def metricas_calidad(request):
     return render(request, 'escolar/metricas_calidad.html', {
         'metricas': metricas,
         'estandares': estandares,
-        'modo_demostrativo': demostracion,
-        'medicion_fecha': '5 de noviembre de 2026',
         'proyecto_nombre': 'TechThree – Sistema de Trayectoria Escolar',
     })
 

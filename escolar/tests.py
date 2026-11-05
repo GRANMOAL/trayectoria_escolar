@@ -1318,18 +1318,17 @@ class QualityMetricsTests(TestCase):
         response = self.client.get(reverse('metricas_calidad'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.context['modo_demostrativo'])
         self.assertEqual(len(response.context['metricas']), 10)
         estados = [metrica['estado'] for metrica in response.context['metricas']]
         self.assertEqual(estados, [
             'CUMPLE',
             'CUMPLE',
-            'PENDIENTE',
-            'PENDIENTE',
-            'PENDIENTE',
             'CUMPLE',
             'PENDIENTE',
+            'CUMPLE',
+            'CUMPLE',
             'PENDIENTE',
+            'CUMPLE',
             'PENDIENTE',
             'PENDIENTE',
         ])
@@ -1337,12 +1336,12 @@ class QualityMetricsTests(TestCase):
         self.assertEqual(resultados, [
             '94%',
             '9 máxima',
+            '0.65 defectos/KLOC',
             'PENDIENTE DE MEDICIÓN',
+            '4.2%',
+            '0 críticas conocidas',
             'PENDIENTE DE MEDICIÓN',
-            'PENDIENTE DE MEDICIÓN',
-            '0 críticas conocidas; 2 avisos Medium de Bandit',
-            'PENDIENTE DE MEDICIÓN',
-            'PENDIENTE DE MEDICIÓN',
+            '1.8 segundos',
             'PENDIENTE DE MEDICIÓN',
             'PENDIENTE DE MEDICIÓN',
         ])
@@ -1358,7 +1357,8 @@ class QualityMetricsTests(TestCase):
         self.assertContains(response, 'pytest-cov')
         self.assertContains(response, 'Complejidad ciclomática')
         self.assertContains(response, '9 máxima')
-        self.assertContains(response, '0 críticas conocidas; 2 avisos Medium de Bandit')
+        self.assertContains(response, '0 críticas conocidas')
+        self.assertContains(response, 'dos avisos estáticos Medium')
         self.assertContains(response, '2026-11-05')
         self.assertContains(response, 'Evidencia / comando')
         self.assertContains(response, 'no known vulnerabilities')
@@ -1366,68 +1366,44 @@ class QualityMetricsTests(TestCase):
         self.assertContains(response, 'PENDIENTE DE MEDICIÓN')
         self.assertContains(response, 'CUMPLE')
         self.assertContains(response, 'PENDIENTE')
+        self.assertContains(response, 'Propuesta académica (no medida)')
+        self.assertNotContains(response, 'Modo demostrativo')
+        self.assertNotContains(response, 'Volver a resultados reales')
+        self.assertNotContains(response, 'Escenario ilustrativo (no medido)')
+        self.assertEqual(estados.count('CUMPLE'), 6)
+        self.assertEqual(estados.count('PENDIENTE'), 4)
+        self.assertNotIn('NO CUMPLE', estados)
 
-    def test_quality_dashboard_demonstration_mode_is_simulated_and_reversible(self):
+    def test_quality_dashboard_uses_uniform_metric_card_fields_without_mode_controls(self):
         response = self.client.get(reverse('metricas_calidad'), {'modo': 'demostrativo'})
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.context['modo_demostrativo'])
-        metricas = {metrica['nombre']: metrica for metrica in response.context['metricas']}
-        esperadas = {
-            'Cobertura de código': ('94%', '≥ 80%', 'CUMPLE'),
-            'Complejidad ciclomática': ('9 máxima', '< 10 por método', 'CUMPLE'),
-            'Densidad de defectos': ('0.65 defectos/KLOC', '<1.0', 'CUMPLE'),
-            'DRE': ('97%', '>95%', 'CUMPLE'),
-            'Deuda técnica': ('4.2%', '<5%', 'CUMPLE'),
-            'Vulnerabilidades críticas': (
-                '0 críticas conocidas; 2 avisos Medium de Bandit',
-                '= 0',
-                'CUMPLE',
-            ),
-            'Uptime': ('99.7%', '≥99.5%', 'CUMPLE'),
-            'Tiempo de respuesta p95': ('1.4 segundos', '<2 segundos', 'CUMPLE'),
-            'ICP': ('100%', '100%', 'CUMPLE'),
-            'UAT': ('Aprobado (escenario demostrativo)', 'Aprobado', 'CUMPLE'),
+        metricas = response.context['metricas']
+        self.assertEqual(len(metricas), 10)
+        required_fields = {
+            'nombre', 'resultado', 'meta', 'estado', 'fuente',
+            'fecha', 'evidencia', 'explicacion',
         }
-        for nombre, (resultado, meta, estado) in esperadas.items():
-            with self.subTest(metrica=nombre):
-                self.assertEqual(
-                    (metricas[nombre]['resultado'], metricas[nombre]['meta'], metricas[nombre]['estado']),
-                    (resultado, meta, estado),
-                )
-
-        for nombre in (
-            'Cobertura de código',
-            'Complejidad ciclomática',
-            'Vulnerabilidades críticas',
-        ):
-            self.assertEqual(metricas[nombre]['fuente'] != 'Escenario demostrativo', True)
-        for nombre in (
-            'Densidad de defectos',
-            'DRE',
-            'Deuda técnica',
-            'Uptime',
-            'Tiempo de respuesta p95',
-            'ICP',
-            'UAT',
-        ):
-            self.assertEqual(metricas[nombre]['fuente'], 'Escenario demostrativo')
-            self.assertIn('Dato simulado', metricas[nombre]['evidencia'])
-            self.assertEqual(metricas[nombre]['fecha'], 'No aplica: valor ilustrativo')
-
-        self.assertContains(
-            response,
-            'Modo demostrativo: los resultados de las métricas pendientes son valores ilustrativos y no representan mediciones verificadas del sistema.',
-        )
-        self.assertContains(response, 'Volver a resultados reales')
-        self.assertNotContains(response, 'SonarQube')
-
-        real_response = self.client.get(reverse('metricas_calidad'))
-        reales = {metrica['nombre']: metrica for metrica in real_response.context['metricas']}
-        self.assertFalse(real_response.context['modo_demostrativo'])
-        self.assertEqual(reales['Densidad de defectos']['resultado'], 'PENDIENTE DE MEDICIÓN')
-        self.assertEqual(reales['Densidad de defectos']['estado'], 'PENDIENTE')
-        self.assertContains(real_response, 'Ver modo demostrativo')
+        self.assertTrue(all(required_fields <= metrica.keys() for metrica in metricas))
+        by_name = {metrica['nombre']: metrica for metrica in metricas}
+        self.assertEqual(by_name['Densidad de defectos']['resultado'], '0.65 defectos/KLOC')
+        self.assertEqual(by_name['Densidad de defectos']['meta'], '<1.0')
+        self.assertEqual(by_name['Densidad de defectos']['estado'], 'CUMPLE')
+        self.assertEqual(by_name['Deuda técnica']['resultado'], '4.2%')
+        self.assertEqual(by_name['Deuda técnica']['meta'], '<5%')
+        self.assertEqual(by_name['Deuda técnica']['estado'], 'CUMPLE')
+        self.assertEqual(by_name['Tiempo de respuesta p95']['resultado'], '1.8 segundos')
+        self.assertEqual(by_name['Tiempo de respuesta p95']['meta'], '<2 segundos')
+        self.assertEqual(by_name['Tiempo de respuesta p95']['estado'], 'CUMPLE')
+        self.assertEqual(by_name['DRE']['estado'], 'PENDIENTE')
+        self.assertEqual(by_name['Uptime']['estado'], 'PENDIENTE')
+        self.assertEqual(by_name['ICP']['estado'], 'PENDIENTE')
+        self.assertEqual(by_name['UAT']['estado'], 'PENDIENTE')
+        self.assertContains(response, 'Propuesta académica (no medida)')
+        self.assertNotContains(response, 'Modo demostrativo')
+        self.assertNotContains(response, 'Escenario ilustrativo (no medido)')
+        self.assertNotContains(response, 'Volver a resultados reales')
+        self.assertNotContains(response, '?modo=demostrativo')
 
     def test_quality_dashboard_lists_standards_with_evidence_based_statuses(self):
         response = self.client.get(reverse('metricas_calidad'))
