@@ -240,6 +240,20 @@ class AvisoPrivacidadAceptacion(models.Model):
         return f"{self.usuario} aceptó el aviso {self.version}"
 
 
+class IntentoInicioSesion(models.Model):
+    usuario = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='intento_inicio_sesion',
+    )
+    intentos_fallidos = models.PositiveSmallIntegerField(default=0)
+    bloqueado_hasta = models.DateTimeField(null=True, blank=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Intentos de inicio de sesión de {self.usuario}"
+
+
 class Consentimiento(models.Model):
     ESTADO_VIGENTE = 'vigente'
     ESTADO_REVOCADO = 'revocado'

@@ -11,6 +11,7 @@ class LoginRequiredMiddleware(MiddlewareMixin):
 
     public_url_names = {
         'login',
+        'login_fallback',
         'aviso_privacidad',
         'solicitud_arco',
         'solicitar_revision_pronostico',

@@ -151,6 +151,11 @@
       <span class="nav-label">Indicadores</span>
     </a>
 
+    <a href="{% url 'metricas_calidad' %}" class="nav-item {% if request.resolver_match.url_name == 'metricas_calidad' %}active{% endif %}">
+      <span class="nav-icon" aria-hidden="true">✓</span>
+      <span class="nav-label">Métricas de Calidad</span>
+    </a>
+
     <a href="{% url 'pronostico' %}" class="nav-item {% if request.resolver_match.url_name == 'pronostico' %}active{% endif %}">
       <span class="nav-icon">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>

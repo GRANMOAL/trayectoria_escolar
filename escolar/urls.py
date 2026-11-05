@@ -6,6 +6,7 @@ urlpatterns = [
     path('alumnos/', views.lista_alumnos, name='lista_alumnos'),
     path('calificaciones/', views.calificaciones_grupo, name='calificaciones'),
     path('indicadores/', views.indicadores, name='indicadores'),
+    path('metricas-calidad/', views.metricas_calidad, name='metricas_calidad'),
     path('pronostico/', views.pronostico_ia, name='pronostico'),
     path(
         'pronostico/solicitar-revision/',

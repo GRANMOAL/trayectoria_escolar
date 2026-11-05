@@ -25,43 +25,76 @@ def contexto_grupo(grupo):
     lineas = [f"GRUPO: {grupo} — {len(alumnos)} alumnos."]
 
     lineas.append("Promedio por asignatura y parcial:")
-    for a in asignaturas:
-        partes = []
-        for p in (1, 2, 3):
-            vals = [c.promedio for c in califs if c.asignatura_id == a.id and c.parcial == p]
-            if vals:
-                partes.append(f"P{p}={sum(vals)/len(vals):.2f}")
-        if partes:
-            lineas.append(f"- {a.nombre}: " + ", ".join(partes))
+    lineas.extend(_lineas_promedio_asignatura(asignaturas, califs))
 
     lineas.append("Alumnos (promedios por parcial; pronóstico P3 por regresión lineal; * = en riesgo):")
+    calificaciones_por_alumno = {}
+    for calificacion in califs:
+        calificaciones_por_alumno.setdefault(calificacion.alumno_id, []).append(calificacion)
     for al in alumnos:
-        cs = [c for c in califs if c.alumno_id == al.id]
-        if not cs:
-            lineas.append(f"- {al.nombre_completo} ({al.numero_cuenta}): sin calificaciones")
-            continue
-        por_parcial = {}
-        for p in (1, 2, 3):
-            v = [c.promedio for c in cs if c.parcial == p]
-            if v:
-                por_parcial[p] = round(sum(v) / len(v), 2)
-        reprob = []
-        for a in asignaturas:
-            prom = {
-                c.parcial: c.promedio
-                for c in cs
-                if c.asignatura_id == a.id
-            }
-            estimacion = explicar_pronostico(prom)
-            pron = estimacion['pronostico'] if estimacion else None
-            ultimo_parcial = max(prom) if prom else None
-            ref = pron if pron is not None else prom.get(ultimo_parcial)
-            if ref is not None and ref < MINIMO:
-                reprob.append(f"{a.nombre} ({ref})")
-        texto = ", ".join(f"P{p}={v}" for p, v in por_parcial.items())
-        riesgo = f" * RIESGO en: {'; '.join(reprob)}" if reprob else ""
-        lineas.append(f"- {al.nombre_completo} ({al.numero_cuenta}): {texto}{riesgo}")
+        lineas.append(_linea_contexto_alumno(
+            al, asignaturas, calificaciones_por_alumno.get(al.id, []),
+        ))
     return "\n".join(lineas)
+
+
+def _lineas_promedio_asignatura(asignaturas, calificaciones):
+    por_asignatura_parcial = {}
+    for calificacion in calificaciones:
+        clave = (calificacion.asignatura_id, calificacion.parcial)
+        por_asignatura_parcial.setdefault(clave, []).append(calificacion.promedio)
+    lineas = []
+    for asignatura in asignaturas:
+        partes = []
+        for parcial in (1, 2, 3):
+            notas = por_asignatura_parcial.get((asignatura.id, parcial), [])
+            if notas:
+                partes.append(f"P{parcial}={sum(notas) / len(notas):.2f}")
+        if partes:
+            lineas.append(f"- {asignatura.nombre}: " + ", ".join(partes))
+    return lineas
+
+
+def _linea_contexto_alumno(alumno, asignaturas, calificaciones):
+    if not calificaciones:
+        return f"- {alumno.nombre_completo} ({alumno.numero_cuenta}): sin calificaciones"
+    promedios_parcial = _promedios_parciales_alumno(calificaciones)
+    riesgos = _asignaturas_en_riesgo(asignaturas, calificaciones)
+    texto = ", ".join(
+        f"P{parcial}={promedio}" for parcial, promedio in promedios_parcial.items()
+    )
+    riesgo = f" * RIESGO en: {'; '.join(riesgos)}" if riesgos else ""
+    return f"- {alumno.nombre_completo} ({alumno.numero_cuenta}): {texto}{riesgo}"
+
+
+def _promedios_parciales_alumno(calificaciones):
+    promedios = {}
+    for parcial in (1, 2, 3):
+        notas = [
+            calificacion.promedio for calificacion in calificaciones
+            if calificacion.parcial == parcial
+        ]
+        if notas:
+            promedios[parcial] = round(sum(notas) / len(notas), 2)
+    return promedios
+
+
+def _asignaturas_en_riesgo(asignaturas, calificaciones):
+    por_asignatura = {}
+    for calificacion in calificaciones:
+        por_asignatura.setdefault(calificacion.asignatura_id, {})[
+            calificacion.parcial
+        ] = calificacion.promedio
+    riesgos = []
+    for asignatura in asignaturas:
+        promedios = por_asignatura.get(asignatura.id, {})
+        estimacion = explicar_pronostico(promedios)
+        pronostico = estimacion['pronostico'] if estimacion else None
+        ultimo_parcial = max(promedios) if promedios else None
+        referencia = pronostico if pronostico is not None else promedios.get(ultimo_parcial)
+        if referencia is not None and referencia < MINIMO:
+            riesgos.append(f"{asignatura.nombre} ({referencia})")
+    return riesgos
 
 
 def contexto_alumno(alumno):

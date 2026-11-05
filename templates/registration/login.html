@@ -19,7 +19,11 @@
       <p>Ingresa con la cuenta que te proporcionó la institución.</p>
     </header>
 
-    {% if form.errors %}
+    {% if form.non_field_errors %}
+    <div class="auth-error" role="alert">
+      {% for error in form.non_field_errors %}{{ error }}{% endfor %}
+    </div>
+    {% elif form.errors %}
     <div class="auth-error" role="alert">El usuario o la contraseña no son correctos. Inténtalo de nuevo.</div>
     {% endif %}
     {% if next and user.is_authenticated %}

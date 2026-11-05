@@ -20,6 +20,29 @@
 7. **Agente IA (Ollama)** — Chat con el modelo local `gemma:4b` que usa como contexto las calificaciones del grupo/alumno seleccionado
 8. **Privacidad y consentimiento** — Aviso público integral y simplificado con versión/fecha; registro auditable y revocable del consentimiento de madre, padre o tutor; bloqueo por alumno sin consentimiento vigente
 9. **Derechos ARCO** — Recepción pública de solicitudes, panel de coordinación, verificación de identidad, exportaciones JSON/Excel, rectificación, bloqueo y supresión con auditoría
+10. **Métricas de Calidad** — Dashboard con resultados medidos y pendientes frente a las metas de calidad
+
+## Métricas de Calidad
+
+La sección **Métricas de Calidad** muestra una fotografía de las mediciones locales del 5 de noviembre de 2026; no ejecuta análisis al abrirse. La cobertura de aplicación fue 94% (2085 sentencias, 122 sin cubrir; tests y migraciones excluidos), la suite completa obtuvo 96% incluyendo tests y otros módulos, y la complejidad máxima por método fue 9. Para repetir los análisis y actualizar resultados, evidencias y fechas del snapshot en `escolar/views.py`, usa:
+
+```bash
+pip install pytest pytest-django pytest-cov radon pip-audit bandit
+python -m pytest escolar/tests.py --ds=trayectoria_escolar.settings --cov=escolar --cov=trayectoria_escolar --cov-report=term
+python -m coverage report --omit="*/tests.py,*/migrations/*"
+python -m radon cc -j escolar trayectoria_escolar
+python -m pip_audit
+python -m bandit -r escolar trayectoria_escolar -ll
+python -m pip check
+```
+
+La cobertura que se muestra en el dashboard excluye tests y migraciones; las funciones críticas revisadas alcanzan al menos 90%. Radon se consulta en formato JSON y la complejidad se compara por método con el umbral del Manual (<10). `pip-audit` no reportó vulnerabilidades conocidas; Bandit reportó dos avisos B310 de severidad Medium y ninguno High, que no se presentan como vulnerabilidades críticas confirmadas. La auditoría examina los paquetes instalados en el entorno; para resultados representativos de producción, ejecútala en un entorno con solo las dependencias de despliegue.
+
+Pillow 13 o posterior es requisito de la instalación para incluir las correcciones de seguridad conocidas por `pip-audit`.
+
+La configuración local usa `DEBUG` activado y una clave exclusiva de desarrollo. Para producción, define `DJANGO_DEBUG=false`, `DJANGO_SECRET_KEY` con una clave aleatoria de al menos 50 caracteres y `DJANGO_ALLOWED_HOSTS` con los dominios permitidos. En modo producción se habilitan por defecto HTTPS, cookies seguras y HSTS; configura el proxy TLS del entorno antes de desplegar.
+
+La densidad de defectos y el DRE requieren datos del registro de defectos y liberaciones; la deuda técnica requiere configurar SonarQube; uptime requiere telemetría del entorno desplegado; p95 requiere una prueba k6/JMeter contra el entorno objetivo; ICP necesita una definición y fuente de datos; UAT requiere registrar la aceptación de usuarios. Esos valores permanecen pendientes hasta contar con dichas fuentes.
 
 ## Instalación
 
@@ -32,7 +55,7 @@ venv\Scripts\activate      # Windows
 
 ### 2. Instalar dependencias
 ```bash
-pip install django openpyxl matplotlib numpy pandas scikit-learn
+pip install django openpyxl matplotlib numpy pandas scikit-learn "Pillow>=13.0.0"
 ```
 
 ### 3. Aplicar migraciones
@@ -54,6 +77,8 @@ python manage.py createsuperuser
 El sistema solicita autenticación para acceder a sus módulos. Inicia sesión con el usuario creado
 con `createsuperuser`, o crea cuentas adicionales desde `/admin/`. El aviso público está disponible
 en `/aviso-de-privacidad/`; completa los datos institucionales señalados antes de usar datos reales.
+Después de 5 intentos fallidos consecutivos, el inicio de sesión de esa cuenta se bloquea durante
+15 minutos, sin importar la dirección IP. Un acceso correcto antes del bloqueo restablece el contador.
 Después de iniciar sesión, cada usuario debe aceptar la versión vigente del aviso para entrar; si la
 rechaza, la sesión se cierra. Las aceptaciones quedan registradas por usuario, versión y fecha/hora, y
 se pueden consultar desde el panel de administración.
