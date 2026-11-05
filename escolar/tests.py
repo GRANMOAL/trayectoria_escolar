@@ -124,6 +124,20 @@ class AuthenticationTests(TestCase):
         self.assertEqual(self.client.get(reverse('dashboard')).status_code, 302)
         self.assertEqual(AvisoPrivacidadAceptacion.objects.count(), 0)
 
+    def test_login_skips_privacy_acceptance_after_user_has_accepted(self):
+        AvisoPrivacidadAceptacion.objects.create(
+            usuario=self.user,
+            version=PRIVACY_NOTICE_VERSION,
+        )
+
+        response = self.client.post(reverse('login'), {
+            'username': self.user.username,
+            'password': 'clave-segura-prueba',
+        })
+
+        self.assertRedirects(response, reverse('dashboard'))
+        self.assertEqual(AvisoPrivacidadAceptacion.objects.count(), 1)
+
     def test_login_blocks_account_after_five_failed_attempts(self):
         for _ in range(4):
             response = self.client.post(reverse('login'), {

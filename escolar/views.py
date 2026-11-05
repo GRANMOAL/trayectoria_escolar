@@ -142,6 +142,12 @@ class LoginRequiringPrivacyAcceptanceView(LoginView):
 
     def get_success_url(self):
         next_url = self.get_redirect_url() or resolve_url(settings.LOGIN_REDIRECT_URL)
+        accepted = AvisoPrivacidadAceptacion.objects.filter(
+            usuario=self.request.user,
+            version=PRIVACY_NOTICE_VERSION,
+        ).exists()
+        if accepted:
+            return next_url
         return f"{reverse('privacy_acceptance')}?{urlencode({'next': next_url})}"
 
 
